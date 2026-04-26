@@ -92,18 +92,21 @@ Anthropic doesn't give you a clear running total of Claude Code spend. They writ
 
 ## Install
 
+One command. No clone. No setup.
+
 ```bash
-bunx vibecosting
+bunx github:ahmedmango/vibecosting
 ```
 
-That's it. Bun fetches and runs the latest. No global install needed.
+Bun fetches the repo, runs the bin, prints your spend. ~2 seconds first run, instant after.
 
-For first-time bun users:
+If you don't have Bun yet:
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
-bunx vibecosting
 ```
+
+> Once published to npm, this becomes simply `bunx vibecosting`. The github form works today regardless.
 
 ## Usage
 
