@@ -1,8 +1,26 @@
-# vibecosting
+<div align="center">
 
-> What's vibe coding costing you?
->
-> A 250-line CLI that reads your local `~/.claude/projects/` transcripts and tells you what you've actually spent on Claude Code — per project, per session, per model. No API key, no telemetry, no daemon.
+<pre>
+   ╔═╗ ╦  ╔╗   ╔═╗  ╔═╗  ╔═╗  ╔═╗  ╔╦╗  ╦  ╔╗   ╔═╗
+   ╚╗║ ║  ╠╩╗  ║╣   ║    ║ ║  ╚═╗   ║   ║  ║║║  ║ ╦
+    ╚╝ ╩  ╚═╝  ╚═╝  ╚═╝  ╚═╝  ╚═╝   ╩   ╩  ╝╚╝  ╚═╝
+        what's vibe coding costing you?
+</pre>
+
+**`bunx vibecosting`** — see what Claude Code is actually costing you, per project · per model · per hour.
+**Local-only · zero deps · MIT**
+
+[![CI](https://github.com/ahmedmango/vibecosting/actions/workflows/test.yml/badge.svg)](https://github.com/ahmedmango/vibecosting/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-8ad06a?style=flat-square)](./LICENSE)
+[![Runtime: Bun](https://img.shields.io/badge/runtime-bun-f472b6?style=flat-square)](https://bun.sh)
+[![Node ≥18](https://img.shields.io/badge/node-≥18-339933?style=flat-square)](https://nodejs.org)
+[![Telemetry: none](https://img.shields.io/badge/telemetry-none-blue?style=flat-square)](#what-it-doesnt-do)
+
+</div>
+
+---
+
+> A small CLI that reads your local `~/.claude/projects/` transcripts and tells you what you've actually spent on Claude Code — per project, per session, per model, per hour. No API key, no telemetry, no daemon.
 
 ```
 $ vibecosting --plan max-5x --overage 57.29
@@ -29,6 +47,40 @@ $ vibecosting --plan max-5x --overage 57.29
 ```
 
 Real output. Two numbers matter: **what you pay** (your subscription + any overage) and **token-cost at API rates** (what those tokens would have cost on the pay-per-token plan). The multiple is a billing comparison — not a value or capability ratio. Same model, same answers; subscription just removes the per-token meter.
+
+## More views
+
+```
+$ vibecosting --by-hour                  # when do you actually code?
+
+   00:00  ▏                                          —     $2.23
+   13:00  ████████████████████████████████████████  10%   $888.5    ← peak
+   14:00  ████████████████████▊                      5%   $460.1
+   15:00  ██████████████████████████████████         9%   $754.4
+```
+
+```
+$ vibecosting --by-tool                  # which tools you call most
+
+  ▸  2451  ██████████████████████████████████   35%  Bash
+     1810  █████████████████████████▏           26%  Edit
+     1365  ██████████████████▉                  20%  Read
+      614  ████████▌                             9%  Write
+```
+
+```
+$ vibecosting --calendar-month --forecast
+
+  $8147  token-cost at raw API rates
+  $9480  by end of month                  ← projected at current rate
+```
+
+```
+$ vibecosting --week --vs-previous
+
+  $1284  total spend
+  ▼ -32% (was $1882)                       ← week-over-week
+```
 
 ---
 

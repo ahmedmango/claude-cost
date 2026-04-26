@@ -70,9 +70,11 @@ export type Session = {
   id: string;
   filePath: string;
   hashDir: string;
-  projectPath: string;       // best-known cwd (real cwd from event > decoded hashDir)
-  model?: string;
-  models: Set<string>;       // all models seen in session (multi-model OK)
+  projectPath: string;            // best-known cwd (real cwd from event > decoded hashDir)
+  model?: string;                 // most recent model in this session
+  dominantModel?: string;         // model with most events in this session
+  models: Set<string>;            // all models seen in session
+  modelEvents: Map<string, number>;  // model -> event count
   tokensIn: number;
   tokensOut: number;
   cacheRead: number;
@@ -80,9 +82,13 @@ export type Session = {
   costUsd: number;
   events: number;
   toolUses: number;
+  toolCounts: Map<string, number>;   // tool name -> count
   errors: number;
-  firstTs: number;            // first event timestamp (ms)
-  lastTs: number;             // last event timestamp (ms)
+  firstTs: number;                // first event timestamp (ms)
+  lastTs: number;                 // last event timestamp (ms)
+  hourBuckets: number[];          // 24-element: cost per hour-of-day (0..23)
+  topMessageCostUsd: number;      // most expensive single assistant turn
+  topMessageTs: number;           // when that turn happened
 };
 
 const HOME = homedir();
@@ -112,10 +118,15 @@ export function parseSession(filePath: string): Session | null {
     id, filePath, hashDir,
     projectPath: decoded,
     models: new Set(),
+    modelEvents: new Map(),
     tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheCreate: 0,
     costUsd: 0, events: 0, toolUses: 0, errors: 0,
+    toolCounts: new Map(),
     firstTs: Number.POSITIVE_INFINITY,
     lastTs: 0,
+    hourBuckets: new Array(24).fill(0),
+    topMessageCostUsd: 0,
+    topMessageTs: 0,
   };
 
   for (const line of text.split('\n')) {
@@ -139,26 +150,44 @@ export function parseSession(filePath: string): Session | null {
     if (obj.type === 'assistant') {
       s.events += 1;
       const msg = obj.message;
+      let turnCost = 0;
       if (msg?.usage) {
         const u = msg.usage;
         const model = msg.model || 'unknown';
         s.model = model;
         s.models.add(model);
+        s.modelEvents.set(model, (s.modelEvents.get(model) ?? 0) + 1);
         const p = priceFor(model);
-        s.tokensIn    += Number(u.input_tokens) || 0;
-        s.tokensOut   += Number(u.output_tokens) || 0;
-        s.cacheRead   += Number(u.cache_read_input_tokens) || 0;
-        s.cacheCreate += Number(u.cache_creation_input_tokens) || 0;
-        s.costUsd += ((Number(u.input_tokens) || 0)                    * p.in)         / 1_000_000;
-        s.costUsd += ((Number(u.output_tokens) || 0)                   * p.out)        / 1_000_000;
-        s.costUsd += ((Number(u.cache_read_input_tokens) || 0)         * p.cacheRead)  / 1_000_000;
-        s.costUsd += ((Number(u.cache_creation_input_tokens) || 0)     * p.cacheWrite) / 1_000_000;
+        const inT  = Number(u.input_tokens) || 0;
+        const outT = Number(u.output_tokens) || 0;
+        const cR   = Number(u.cache_read_input_tokens) || 0;
+        const cC   = Number(u.cache_creation_input_tokens) || 0;
+        s.tokensIn    += inT;
+        s.tokensOut   += outT;
+        s.cacheRead   += cR;
+        s.cacheCreate += cC;
+        turnCost  = (inT * p.in + outT * p.out + cR * p.cacheRead + cC * p.cacheWrite) / 1_000_000;
+        s.costUsd += turnCost;
       }
-      // Detect tool_use sub-blocks
+      // Track most expensive single message
+      if (turnCost > s.topMessageCostUsd) {
+        s.topMessageCostUsd = turnCost;
+        s.topMessageTs = ts;
+      }
+      // Bucket cost by hour-of-day (local time of the timestamp)
+      if (ts) {
+        const h = new Date(ts).getHours();
+        s.hourBuckets[h] += turnCost;
+      }
+      // tool_use sub-blocks
       const content = msg?.content;
       if (Array.isArray(content)) {
         for (const b of content) {
-          if (b?.type === 'tool_use') s.toolUses += 1;
+          if (b?.type === 'tool_use') {
+            s.toolUses += 1;
+            const tn = (b.name || 'unknown') as string;
+            s.toolCounts.set(tn, (s.toolCounts.get(tn) ?? 0) + 1);
+          }
         }
       }
     } else if (obj.type === 'user') {
@@ -175,6 +204,20 @@ export function parseSession(filePath: string): Session | null {
   }
 
   if (!Number.isFinite(s.firstTs)) s.firstTs = 0;
+  // Compute dominantModel: model with most events
+  let topN = 0;
+  for (const [m, n] of s.modelEvents) {
+    if (n > topN) { topN = n; s.dominantModel = m; }
+  }
+  return s;
+}
+
+// Short-display name for a model: "claude-opus-4-7-20251201" → "opus-4-7"
+export function shortModel(m: string | undefined): string {
+  if (!m) return '?';
+  const x = m.toLowerCase();
+  // strip claude- prefix and any -date-yyyymmdd suffix
+  let s = x.replace(/^claude-/, '').replace(/-\d{8}$/, '');
   return s;
 }
 
