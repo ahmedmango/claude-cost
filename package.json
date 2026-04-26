@@ -1,16 +1,16 @@
 {
-  "name": "claude-cost",
-  "version": "0.1.4",
-  "description": "See exactly how much you've spent on Claude Code, per project, per session, per model. Reads your local ~/.claude/projects/ transcripts. No API key, no telemetry.",
+  "name": "vibecosting",
+  "version": "0.2.0",
+  "description": "What's vibe coding costing you? A 250-line CLI that reads your ~/.claude/projects transcripts and shows actual spend, plan value, and cache hit rate per project.",
   "type": "module",
   "license": "MIT",
   "author": "Ahmed Haffadh",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ahmedmango/claude-cost"
+    "url": "https://github.com/ahmedmango/vibecosting"
   },
-  "homepage": "https://github.com/ahmedmango/claude-cost",
-  "bugs": "https://github.com/ahmedmango/claude-cost/issues",
+  "homepage": "https://github.com/ahmedmango/vibecosting",
+  "bugs": "https://github.com/ahmedmango/vibecosting/issues",
   "keywords": [
     "claude",
     "claude-code",
@@ -19,13 +19,15 @@
     "tokens",
     "billing",
     "cli",
-    "developer-tools"
+    "developer-tools",
+    "vibe-coding",
+    "ai-coding"
   ],
   "engines": {
     "node": ">=18.0.0"
   },
   "bin": {
-    "claude-cost": "bin/claude-cost.mjs"
+    "vibecosting": "bin/vibecosting.mjs"
   },
   "files": [
     "bin/",

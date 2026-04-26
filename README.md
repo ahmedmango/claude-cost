@@ -1,117 +1,111 @@
-# claude-cost
+# vibecosting
 
-> See exactly how much you've spent on Claude Code. Per project, per session, per model.
+> What's vibe coding costing you?
+>
+> A 250-line CLI that reads your local `~/.claude/projects/` transcripts and tells you what you've actually spent on Claude Code — per project, per session, per model. No API key, no telemetry, no daemon.
 
 ```
-$ claude-cost --plan max-5x --overage 57.29
+$ vibecosting --plan max-5x --overage 57.29
 
   ╭──────────────────────────────────────────────────────────────────────────╮
-  │  ◆ claude-cost · last 30 days · Claude Max (5×)                          │
+  │  ◆ vibecosting · last 30 days · Claude Max (5×)                          │
   │                                                                          │
   │  $157.3  what you actually pay ($100.0 plan + $57.29 overage)            │
-  │  $8657   token-cost at raw API rates (same model, different billing)     │
-  │  55.0×   per-token cost ratio (not a value/capability ratio)             │
+  │  $8746   token-cost at raw API rates (same model, different billing)     │
+  │  55.6×   per-token cost ratio (not a value/capability ratio)             │
   │  97%     cache hit · 31 sessions · 13 projects                           │
   │                                                                          │
   │  note: 97% cache means most "raw cost" is repeated context.              │
   │        at API rates you'd architect prompts to use less of it.           │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
-  ▸   $5995  ███████████████████   69%  ~/DemoPortal               5 sess
-     $698.0  ██▎                    8%  ~/quant                    1 sess
-     $693.4  ██▎                    8%  ~/code/claude-cost         1 sess
-     $483.7  █▌                     6%  ~                         11 sess
-     $221.1  ▊                      3%  ~/Desktop/cortex-report    1 sess
+  ▸   $6014  ██████████████████████   69%  ~/DemoPortal          5 sess ·  97% cache
+     $748.6  ██▊                       9%  ~/code/claude-cost    1 sess ·  98% cache
+     $698.0  ██▎                       8%  ~/quant               1 sess ·  97% cache
+     $483.7  █▍                        6%  ~                    11 sess ·  94% cache
+     $221.1  ▊                         3%  ~/Desktop/cortex      1 sess ·  97% cache
 
   + 8 more · try --all
 ```
 
-Two numbers matter: **what you pay** (plan + overage) and **token-cost at API rates** (what those tokens would cost on the API plan). The multiple tells you the *billing* difference — not that you got 55× smarter outputs. Same model, same answers; subscription just removes the per-token meter.
+Real output. Two numbers matter: **what you pay** (your subscription + any overage) and **token-cost at API rates** (what those tokens would have cost on the pay-per-token plan). The multiple is a billing comparison — not a value or capability ratio. Same model, same answers; subscription just removes the per-token meter.
 
 ---
 
 ## Why
 
-Anthropic doesn't show you what you've spent on Claude Code. The `claude` CLI writes a transcript per session to `~/.claude/projects/`, and the usage data is in there — but it's buried in JSONL lines you'd need to parse yourself.
+Anthropic doesn't give you a clear running total of Claude Code spend. They write per-session transcripts to `~/.claude/projects/`, which contain every token count, but it's buried in JSONL.
 
-**`claude-cost` parses those transcripts and prints a number.** That's the whole tool.
-
-It runs locally, makes no network calls, never sees your API key. It just reads files you already have.
+`vibecosting` parses those files and prints the number. Local-only, ~250 lines of TypeScript, zero runtime dependencies.
 
 ## Install
 
 ```bash
-bunx claude-cost
+bunx vibecosting
 ```
 
-(or once installed: `claude-cost`)
+That's it. Bun fetches and runs the latest. No global install needed.
 
-Requires:
-- [Bun](https://bun.sh) — `curl -fsSL https://bun.sh/install | bash`
-- [Claude Code](https://www.anthropic.com/claude-code) — at least one session run, so the transcript files exist
+For first-time bun users:
+
+```bash
+curl -fsSL https://bun.sh/install | bash
+bunx vibecosting
+```
 
 ## Usage
 
 ```bash
-claude-cost                       # last 30 days, by project (default)
-claude-cost --week                # last 7 days
-claude-cost --today               # since 00:00 today
-claude-cost --calendar-month      # 1st of this month → today
-claude-cost --all                 # lifetime
-claude-cost --since 2026-01-01    # custom start date
+vibecosting                        # last 30 days, by project (default)
+vibecosting --week                 # last 7 days
+vibecosting --today                # since 00:00 today
+vibecosting --calendar-month       # 1st of this month → today
+vibecosting --all                  # lifetime
+vibecosting --since 2026-01-01     # custom start
 
-claude-cost --by-model            # group by model instead of project
-claude-cost --by-day              # group by calendar day
-claude-cost --by-session          # one row per session
+vibecosting --by-model             # group by model
+vibecosting --by-day               # group by calendar day (with sparkline)
+vibecosting --by-session           # one row per session
 
-claude-cost --plan max-5x         # reframe for subscribers (free/pro/max-5x/max-20x/team/enterprise)
-claude-cost --plan max-5x --overage 57.29   # also include your billed overage from claude.ai
-claude-cost --currency EUR        # convert (USD/EUR/GBP/CAD/JPY/INR/...)
-claude-cost --rate 0.91           # custom fx rate, 1 USD = 0.91 target
-claude-cost --show-pricing        # print the model price table
-claude-cost --top 5               # top 5 only (default 10)
-claude-cost --json                # machine output (jq it)
-claude-cost --help
+vibecosting --plan max-5x          # reframe for subscribers (free/pro/max-5x/max-20x/team/enterprise)
+vibecosting --plan max-5x --overage 57.29   # include your billed overage from claude.ai
+
+vibecosting --currency EUR         # convert (USD/EUR/GBP/CAD/JPY/INR/...)
+vibecosting --rate 0.91            # custom fx rate (1 USD = 0.91 target)
+vibecosting --show-pricing         # print the model price table
+
+vibecosting --top 5                # top 5 only (default 10)
+vibecosting --json                 # machine output (jq it)
+vibecosting --help
 ```
 
-20 currencies built-in: USD EUR GBP CAD AUD JPY CNY INR BRL MXN CHF SEK NOK KRW SGD AED SAR TRY ZAR NGN. Set `CLAUDE_COST_CURRENCY=EUR` in your shell to make it default.
+20 currencies built-in. Set `CLAUDE_COST_PLAN=max-5x` and `CLAUDE_COST_OVERAGE=57.29` in your shell to make them defaults.
 
 ### Pipe-friendly
 
 ```bash
-# Daily spend chart (jq + your favorite charter)
-claude-cost --month --by-day --json | jq '.rows[] | [.label, .costUsd] | @csv'
+# Daily spend chart
+vibecosting --month --by-day --json | jq '.rows[] | [.label, .cost] | @csv'
 
-# Total cost across everything you've ever done
-claude-cost --all --json | jq '.totals.costUsd'
+# Total billed across everything you've ever done
+vibecosting --all --json | jq '.totals.actualPaidUsd'
 
 # Top 1 project, just the dollar amount
-claude-cost --top 1 --json | jq -r '.rows[0].costUsd'
+vibecosting --top 1 --json | jq -r '.rows[0].costUsd'
 ```
 
 ## What the columns mean
 
 | column           | what                                                          |
 | ---------------- | ------------------------------------------------------------- |
-| **$**            | USD spend at Anthropic's published rates                      |
+| **$**            | USD spend at Anthropic's published rates (or your currency)   |
+| **bar / %**      | share of total                                                |
 | **out**          | output tokens (the expensive ones)                            |
 | **ev**           | "events" — assistant turns + user turns                       |
 | **sess**         | distinct sessions in this bucket                              |
 | **cache N%**     | cache_read / (cache_read + cache_create + tokens_in)          |
 
-A high cache hit rate (≥70%, green) means most of your context is being reused — you're paying ~10× less than you would without caching. Low (red, <40%) means a lot of full-priced re-reads. Often a fixable workflow issue.
-
-## Pricing
-
-Hardcoded per-1M-token rates. Adjust in `src/parse.ts`:
-
-```ts
-opus:   { in: 15, out: 75, cacheRead: 1.50, cacheWrite: 18.75 },
-sonnet: { in:  3, out: 15, cacheRead: 0.30, cacheWrite:  3.75 },
-haiku:  { in:  1, out:  5, cacheRead: 0.10, cacheWrite:  1.25 },
-```
-
-These match Anthropic's published rates as of v0.1.0. Unknown models default to sonnet rates (conservative).
+A high cache hit rate (≥70%, green) means most context is being reused — paying ~10× less than full input tier. Low (<40%, red) means full-priced re-reads. Often a fixable workflow issue.
 
 ## How accurate is it?
 
@@ -119,20 +113,21 @@ These match Anthropic's published rates as of v0.1.0. Unknown models default to 
 
 **Dollar amounts are calculated**, not received. Caveats:
 
-1. **API-rate vs subscription-rate.** By default the tool computes what your tokens would cost at raw API rates. If you're on Claude Pro / Max / Team, you're not paying that — you're paying your subscription. **Use `--plan max-5x` (or your tier) to reframe.** With `--overage N` you can also pass the actual overage from your claude.ai billing page so the "what you actually pay" number is exact.
+1. **API-rate vs subscription-rate.** By default, output is computed at raw API rates. If you're on Claude Pro / Max / Team, you're paying your subscription, not these per-token totals. **Use `--plan max-5x`** (or your tier) to reframe. With `--overage N` you can also pass the actual overage from claude.ai → Settings → Usage so the "what you actually pay" number is exact.
 
    ⚠️ **Don't read "55× ratio" as "55× smarter."** Same model, same outputs. The multiple is a per-token billing comparison, distorted by cache reads (which would be architected differently on the API plan) and by the fact that subscription users use Claude more freely because there's no meter ticking.
-2. **Pricing is hardcoded** at ship time. If Anthropic changes rates, output drifts until you `git pull` (or override prices via env vars).
-3. **Currency rates are approximate**, baked at v0.1.1. For accuracy, set `CLAUDE_COST_RATE` from a live FX source.
+
+2. **Pricing is hardcoded** at ship time. If Anthropic changes rates, output drifts until next release.
+3. **Currency rates are approximate** — set `CLAUDE_COST_RATE` for live FX.
 4. **Model name matching is fuzzy** — `claude-3-5-sonnet` and `claude-sonnet-4-7` both get sonnet rates. Off by 10–30% on legacy sessions.
 
-Run `claude-cost --show-pricing` to see the exact rate table being used.
+Run `vibecosting --show-pricing` to see the exact rate table being used.
 
 ### Plans reference
 
 | `--plan` | what | $/mo |
 |---|---|---|
-| `api` (default) | pay-per-token, no subscription | 0 |
+| `api` (default) | pay-per-token | 0 |
 | `free` | Claude free tier | 0 |
 | `pro` | Claude Pro | 20 |
 | `max-5x` | Claude Max 5× | 100 |
@@ -147,7 +142,7 @@ Update prices in `src/parse.ts → PLANS` if Anthropic changes them.
 - ❌ Limit / cap your spending (read-only by design)
 - ❌ Watch live (run again to refresh — it's that fast)
 - ❌ Send anything anywhere (entirely local)
-- ❌ Track API usage outside Claude Code (the `claude` CLI is the source)
+- ❌ Track API usage outside Claude Code
 
 ## How it works
 
@@ -166,15 +161,15 @@ Update prices in `src/parse.ts → PLANS` if Anthropic changes them.
             bucket() — group by project/model/day/session
                  │
                  ▼
-            render() — terminal table
+            render() — terminal table with bars & sparklines
 ```
 
 ~250 lines of TypeScript. Zero runtime dependencies.
 
 ## License
 
-MIT. Fork it. The `~/.claude/projects` format isn't documented — if Anthropic changes it, this will break gracefully (returns 0 cost rather than crashing) and need an update.
+MIT. Fork it.
 
 ## Sibling projects
 
-- [claude-colony](https://github.com/ahmedmango/claude-colony) — same data source, opposite philosophy: a pixel-art live dashboard. claude-cost is the focused CLI that fell out of building it.
+- [claude-colony](https://github.com/ahmedmango/claude-colony) — same data source, opposite philosophy: a pixel-art live dashboard. vibecosting is the focused CLI that fell out of building it.

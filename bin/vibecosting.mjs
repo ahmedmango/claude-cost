@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* claude-cost CLI shim — finds bun, runs src/cli.ts, forwards stdio. */
+/* vibecosting CLI shim — finds bun, runs src/cli.ts, forwards stdio. */
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -10,7 +10,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENTRY = join(REPO, 'src', 'cli.ts');
 
 if (!existsSync(ENTRY)) {
-  console.error(`[claude-cost] entry missing: ${ENTRY}`);
+  console.error(`[vibecosting] entry missing: ${ENTRY}`);
   process.exit(1);
 }
 
@@ -20,7 +20,7 @@ const hasBun = await new Promise((r) => {
   t.on('close', (code) => r(code === 0));
 });
 if (!hasBun) {
-  console.error('[claude-cost] Bun is required. Install: curl -fsSL https://bun.sh/install | bash');
+  console.error('[vibecosting] Bun is required. Install: curl -fsSL https://bun.sh/install | bash');
   process.exit(1);
 }
 

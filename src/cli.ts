@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// claude-cost — see what you've spent on Claude Code.
+// vibecosting — see what you've spent on Claude Code.
 
 import { loadAllSessions, shortPath, CURRENCIES, PRICING, PLANS, type Session } from './parse.ts';
 
@@ -83,10 +83,10 @@ function parseArgs(argv: string[]): Args {
 }
 
 const HELP = `
-${C.bold}claude-cost${C.reset} — what you've spent on Claude Code
+${C.bold}vibecosting${C.reset} — what you've spent on Claude Code
 
 ${C.bold}USAGE${C.reset}
-  ${C.cyan}claude-cost${C.reset} [range] [grouping] [options]
+  ${C.cyan}vibecosting${C.reset} [range] [grouping] [options]
 
 ${C.bold}RANGE${C.reset} (default: --month)
   --today           activity since 00:00 today
@@ -132,16 +132,16 @@ ${C.bold}ACCURACY NOTE${C.reset}
 
 ${C.bold}EXAMPLES${C.reset}
   ${C.dim}# How much did I spend this month?${C.reset}
-  claude-cost
+  vibecosting
 
   ${C.dim}# Top 5 most expensive projects this week${C.reset}
-  claude-cost --week --top 5
+  vibecosting --week --top 5
 
   ${C.dim}# Cost broken down by model, all time${C.reset}
-  claude-cost --all --by-model
+  vibecosting --all --by-model
 
   ${C.dim}# Daily spend in JSON for a chart${C.reset}
-  claude-cost --month --by-day --json | jq
+  vibecosting --month --by-day --json | jq
 
 ${C.dim}Reads ~/.claude/projects/*.jsonl. No network. No telemetry.${C.reset}
 `;
@@ -318,7 +318,7 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
   const ccTag = CURRENCY_CODE === 'USD' ? '' : ` · ${CURRENCY_CODE}`;
   const plan = PLANS[args.plan] ?? PLANS.api;
   const planTag = args.plan !== 'api' ? ` · ${plan.name}` : '';
-  const headerText = `◆ claude-cost · ${label}${ccTag}${planTag}`;
+  const headerText = `◆ vibecosting · ${label}${ccTag}${planTag}`;
   const boxWidth = Math.max(56, Math.min(74, term - 4));
   const lineH = '─'.repeat(boxWidth);
   const top    = `╭${lineH}╮`;
@@ -445,7 +445,7 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('claude-cost 0.1.4');
+    console.log('vibecosting 0.2.0');
     return;
   }
 

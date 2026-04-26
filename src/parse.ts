@@ -5,7 +5,7 @@ import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 
 // Pricing (USD per 1M tokens). Per Anthropic's published rates as of 2026-04.
-// Override at runtime via ~/.claude-cost.json or CLAUDE_COST_PRICING env var.
+// Override at runtime via ~/.vibecosting.json or CLAUDE_COST_PRICING env var.
 //
 // SUBSCRIPTION USERS NOTE: if you're on Claude Max/Team flat-rate, what you
 // actually pay is $200/month (or whatever your plan is), not these rates.
