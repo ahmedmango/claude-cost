@@ -7,7 +7,7 @@
         what's vibe coding costing you?
 </pre>
 
-**`bunx vibecosting`** — see what Claude Code is actually costing you, per project · per model · per hour.
+**`bunx vibecosting`** — put a dollar value on your Claude Code token usage.
 **Local-only · zero deps · MIT**
 
 [![CI](https://github.com/ahmedmango/vibecosting/actions/workflows/test.yml/badge.svg)](https://github.com/ahmedmango/vibecosting/actions/workflows/test.yml)
@@ -20,33 +20,38 @@
 
 ---
 
-> A small CLI that reads your local `~/.claude/projects/` transcripts and tells you what you've actually spent on Claude Code — per project, per session, per model, per hour. No API key, no telemetry, no daemon.
+`vibecosting` is a local CLI that reads Claude Code's transcript files and prices your token usage at Anthropic API rates. It shows the API-equivalent value of your work by project, model, session, day, hour, and tool.
+
+No API key. No telemetry. No daemon. Just the receipts Claude Code already writes on your machine.
+
+It answers the fun question:
+
+> If this Claude Code usage had gone through the API meter, what would it have cost?
 
 ```
-$ vibecosting --plan max-5x --overage 57.29
+$ vibecosting
 
   ╭──────────────────────────────────────────────────────────────────────────╮
-  │  ◆ vibecosting · last 30 days · Claude Max (5×)                          │
+  │  ◆ vibecosting · last 30 days                                            │
   │                                                                          │
-  │  $157.3  what you actually pay ($100.0 plan + $57.29 overage)            │
-  │  $8746   token-cost at raw API rates (same model, different billing)     │
-  │  55.6×   per-token cost ratio (not a value/capability ratio)             │
-  │  97%     cache hit · 31 sessions · 13 projects                           │
-  │                                                                          │
-  │  note: 97% cache means most "raw cost" is repeated context.              │
-  │        at API rates you'd architect prompts to use less of it.           │
+  │  $9414   total spend (API rates)                                          │
+  │  6.9M    output tokens · 90.3K fresh input                               │
+  │  3.9B    cache read · 105.2M cache write                                 │
+  │  97%     cache hit · 102 sessions · 17 projects                          │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
-  ▸   $6014  ██████████████████████   69%  ~/DemoPortal          5 sess ·  97% cache
-     $748.6  ██▊                       9%  ~/code/claude-cost    1 sess ·  98% cache
-     $698.0  ██▎                       8%  ~/quant               1 sess ·  97% cache
-     $483.7  █▍                        6%  ~                    11 sess ·  94% cache
-     $221.1  ▊                         3%  ~/Desktop/cortex      1 sess ·  97% cache
+  ▸   $6766  ████████   72%  ~/DemoPortal            opus-4-6    43 sess ·  97% cache
+     $722.4  ▉           8%  ~/doo-demo-sdk          opus-4-6     5 sess ·  97% cache
+     $536.9  ▋           6%  ~/quant                 opus-4-6     1 sess ·  98% cache
+     $479.1  ▋           5%  ~/code/vibecosting      opus-4-7     1 sess ·  99% cache
+     $349.9  ▍           4%  ~                       opus-4-6    17 sess ·  95% cache
 
-  + 8 more · try --all
+  + 12 more · try --all
 ```
 
-Real output. Two numbers matter: **what you pay** (your subscription + any overage) and **token-cost at API rates** (what those tokens would have cost on the pay-per-token plan). The multiple is a billing comparison — not a value or capability ratio. Same model, same answers; subscription just removes the per-token meter.
+This is not your subscription bill. It is the API-rate shadow price of the tokens Claude Code consumed. If you are on Claude Pro / Max / Team, that distinction is the whole point: subscription billing hides the meter, while `vibecosting` shows the token value underneath.
+
+The big number is usually cache, not fresh input. In the sample above, only 90.3K tokens were fresh input, but 3.9B cached tokens were read back into context. That is why long coding sessions can look absurdly expensive at API rates.
 
 ## More views
 
@@ -86,9 +91,9 @@ $ vibecosting --week --vs-previous
 
 ## Why
 
-Anthropic doesn't give you a clear running total of Claude Code spend. They write per-session transcripts to `~/.claude/projects/`, which contain every token count, but it's buried in JSONL.
+Anthropic doesn't give you a clear running total of Claude Code's API-equivalent token value. Claude Code writes per-session transcripts to `~/.claude/projects/`, which contain every token count, but it's buried in JSONL.
 
-`vibecosting` parses those files and prints the number. Local-only, ~250 lines of TypeScript, zero runtime dependencies.
+`vibecosting` parses those files and prints the number. Local-only TypeScript, zero runtime dependencies.
 
 ## Install
 
@@ -229,7 +234,7 @@ Update prices in `src/parse.ts → PLANS` if Anthropic changes them.
             render() — terminal table with bars & sparklines
 ```
 
-~250 lines of TypeScript. Zero runtime dependencies.
+Local-only TypeScript. Zero runtime dependencies.
 
 ## License
 

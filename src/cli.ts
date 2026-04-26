@@ -155,7 +155,7 @@ ${C.bold}EXAMPLES${C.reset}
   ${C.dim}# Daily spend in JSON for a chart${C.reset}
   vibecosting --month --by-day --json | jq
 
-${C.dim}Reads ~/.claude/projects/*.jsonl. No network. No telemetry.${C.reset}
+${C.dim}Reads ~/.claude/projects/**/*.jsonl. No network. No telemetry.${C.reset}
 `;
 
 // ─── DATE WINDOW ─────────────────────────────────────────────────────────
