@@ -569,7 +569,7 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('vibecosting 0.3.0');
+    console.log('vibecosting 0.3.1');
     return;
   }
 
