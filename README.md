@@ -55,6 +55,7 @@ Requires:
 claude-cost                       # last 30 days, by project (default)
 claude-cost --week                # last 7 days
 claude-cost --today               # since 00:00 today
+claude-cost --calendar-month      # 1st of this month → today
 claude-cost --all                 # lifetime
 claude-cost --since 2026-01-01    # custom start date
 
@@ -62,10 +63,15 @@ claude-cost --by-model            # group by model instead of project
 claude-cost --by-day              # group by calendar day
 claude-cost --by-session          # one row per session
 
+claude-cost --currency EUR        # convert (USD/EUR/GBP/CAD/JPY/INR/...)
+claude-cost --rate 0.91           # custom fx rate, 1 USD = 0.91 target
+claude-cost --show-pricing        # print the model price table
 claude-cost --top 5               # top 5 only (default 10)
 claude-cost --json                # machine output (jq it)
 claude-cost --help
 ```
+
+20 currencies built-in: USD EUR GBP CAD AUD JPY CNY INR BRL MXN CHF SEK NOK KRW SGD AED SAR TRY ZAR NGN. Set `CLAUDE_COST_CURRENCY=EUR` in your shell to make it default.
 
 ### Pipe-friendly
 
@@ -103,6 +109,19 @@ haiku:  { in:  1, out:  5, cacheRead: 0.10, cacheWrite:  1.25 },
 ```
 
 These match Anthropic's published rates as of v0.1.0. Unknown models default to sonnet rates (conservative).
+
+## How accurate is it?
+
+**Token counts are exact** — they come straight from Anthropic's response in the transcript. No math from this tool.
+
+**Dollar amounts are calculated**, not received. Caveats:
+
+1. **Subscription users** (Claude Max / Team flat-rate plans) actually pay their monthly subscription, not these per-token totals. This tool computes what your tokens *would* cost at API rates. Useful for "am I overusing my plan?" — not for "what was on my card statement".
+2. **Pricing is hardcoded** at ship time. If Anthropic changes rates, output drifts until you `git pull` (or override prices via `~/.claude-cost.json`).
+3. **Currency rates are approximate**, baked at v0.1.1. For accuracy, set `CLAUDE_COST_RATE` from a live FX source.
+4. **Model name matching is fuzzy** — `claude-3-5-sonnet` and `claude-sonnet-4-7` both get sonnet rates. Off by 10–30% on legacy sessions.
+
+Run `claude-cost --show-pricing` to see the exact rate table being used.
 
 ## What it doesn't do
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // claude-cost — see what you've spent on Claude Code.
 
-import { loadAllSessions, shortPath, type Session } from './parse.ts';
+import { loadAllSessions, shortPath, CURRENCIES, PRICING, type Session } from './parse.ts';
 
 // ─── ANSI ────────────────────────────────────────────────────────────────
 const isTTY = process.stdout.isTTY;
@@ -22,22 +22,36 @@ const C = isTTY ? {
 
 // ─── ARGS ────────────────────────────────────────────────────────────────
 type Args = {
-  range: 'today' | 'week' | 'month' | 'all';
+  range: 'today' | 'week' | 'month' | 'all' | 'calendar-month';
   since?: number;
   groupBy: 'project' | 'model' | 'day' | 'session';
   top: number;
   json: boolean;
   help: boolean;
   version: boolean;
+  currency: string;       // ISO code: USD, EUR, GBP, ...
+  customRate?: number;    // override rate (per 1 USD)
+  showPricing: boolean;
 };
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { range: 'month', groupBy: 'project', top: 10, json: false, help: false, version: false };
+  const a: Args = {
+    range: 'month',
+    groupBy: 'project',
+    top: 10,
+    json: false,
+    help: false,
+    version: false,
+    currency: (process.env.CLAUDE_COST_CURRENCY || 'USD').toUpperCase(),
+    customRate: process.env.CLAUDE_COST_RATE ? Number(process.env.CLAUDE_COST_RATE) : undefined,
+    showPricing: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
     if (v === '--today') a.range = 'today';
     else if (v === '--week') a.range = 'week';
     else if (v === '--month') a.range = 'month';
+    else if (v === '--calendar-month') a.range = 'calendar-month';
     else if (v === '--all' || v === '--lifetime') a.range = 'all';
     else if (v === '--since' && argv[i+1]) {
       const t = Date.parse(argv[++i]);
@@ -48,6 +62,9 @@ function parseArgs(argv: string[]): Args {
     else if (v === '--by-day')     a.groupBy = 'day';
     else if (v === '--by-session') a.groupBy = 'session';
     else if (v === '--top' && argv[i+1]) a.top = Number(argv[++i]) || 10;
+    else if (v === '--currency' && argv[i+1]) a.currency = argv[++i].toUpperCase();
+    else if (v === '--rate' && argv[i+1]) a.customRate = Number(argv[++i]) || undefined;
+    else if (v === '--show-pricing') a.showPricing = true;
     else if (v === '--json' || v === '-j') a.json = true;
     else if (v === '--help' || v === '-h') a.help = true;
     else if (v === '--version' || v === '-v') a.version = true;
@@ -66,23 +83,39 @@ ${C.bold}USAGE${C.reset}
   ${C.cyan}claude-cost${C.reset} [range] [grouping] [options]
 
 ${C.bold}RANGE${C.reset} (default: --month)
-  --today          activity since 00:00 today
-  --week           last 7 days
-  --month          last 30 days
-  --all            lifetime
-  --since DATE     ISO date, e.g. 2026-01-01
+  --today           activity since 00:00 today
+  --week            last 7 days
+  --month           last 30 days (trailing)
+  --calendar-month  this calendar month (1st → today)
+  --all             lifetime
+  --since DATE      ISO date, e.g. 2026-01-01
 
 ${C.bold}GROUPING${C.reset} (default: --by-project)
-  --by-project     group by repo / cwd
-  --by-model       group by model
-  --by-day         group by calendar day
-  --by-session     one row per session
+  --by-project      group by repo / cwd
+  --by-model        group by model
+  --by-day          group by calendar day
+  --by-session      one row per session
+
+${C.bold}CURRENCY${C.reset} (default: USD; override with $CLAUDE_COST_CURRENCY)
+  --currency CODE   convert to USD/EUR/GBP/CAD/AUD/JPY/CNY/INR/BRL/MXN/
+                    CHF/SEK/NOK/KRW/SGD/AED/SAR/TRY/ZAR/NGN
+                    (rates approximate, baked at v0.1.1)
+  --rate N          override conversion rate (1 USD = N target)
+                    or set $CLAUDE_COST_RATE
+  --show-pricing    print the model price table being used
 
 ${C.bold}OUTPUT${C.reset}
-  --top N          show top N rows (default 10)
-  --json, -j       machine-readable JSON
-  --help, -h       this help
-  --version, -v    print version
+  --top N           show top N rows (default 10)
+  --json, -j        machine-readable JSON
+  --help, -h        this help
+  --version, -v     print version
+
+${C.bold}ACCURACY NOTE${C.reset}
+  ${C.dim}Token counts come from Anthropic's response — those are exact.${C.reset}
+  ${C.dim}Prices are hardcoded at ship time. If Anthropic changes rates,${C.reset}
+  ${C.dim}your output drifts until \`git pull\` (or override w/ env vars).${C.reset}
+  ${C.dim}If you're on Claude Max/Team flat-rate plans, what you actually${C.reset}
+  ${C.dim}pay is the subscription, not these per-token totals.${C.reset}
 
 ${C.bold}EXAMPLES${C.reset}
   ${C.dim}# How much did I spend this month?${C.reset}
@@ -108,6 +141,10 @@ function rangeStart(range: Args['range'], since?: number): number {
   if (range === 'today') {
     const d = new Date(now); d.setHours(0,0,0,0); return d.getTime();
   }
+  if (range === 'calendar-month') {
+    const d = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    return d.getTime();
+  }
   if (range === 'week')  return now.getTime() - 7 * 24 * 60 * 60 * 1000;
   if (range === 'month') return now.getTime() - 30 * 24 * 60 * 60 * 1000;
   return 0;
@@ -118,16 +155,49 @@ function rangeLabel(range: Args['range'], since?: number): string {
   if (range === 'today') return 'today';
   if (range === 'week') return 'last 7 days';
   if (range === 'month') return 'last 30 days';
+  if (range === 'calendar-month') {
+    const d = new Date();
+    return d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  }
   if (range === 'all') return 'lifetime';
   return range;
 }
 
 // ─── FORMAT HELPERS ───────────────────────────────────────────────────────
-function fmtCost(n: number): string {
-  if (n >= 1000) return `$${n.toFixed(0)}`;
-  if (n >= 100)  return `$${n.toFixed(1)}`;
-  if (n >= 1)    return `$${n.toFixed(2)}`;
-  return `$${n.toFixed(3)}`;
+let CURRENCY_SYMBOL = '$';
+let CURRENCY_RATE = 1.0;
+let CURRENCY_CODE = 'USD';
+
+function setCurrency(code: string, customRate?: number) {
+  CURRENCY_CODE = code;
+  if (customRate && Number.isFinite(customRate) && customRate > 0) {
+    CURRENCY_RATE = customRate;
+    const known = CURRENCIES[code];
+    CURRENCY_SYMBOL = known?.symbol ?? code + ' ';
+    return;
+  }
+  const c = CURRENCIES[code];
+  if (!c) {
+    console.error(`unknown currency: ${code}. Known: ${Object.keys(CURRENCIES).join(', ')}`);
+    console.error(`Or pass --rate N for a custom rate.`);
+    process.exit(2);
+  }
+  CURRENCY_RATE = c.rate;
+  CURRENCY_SYMBOL = c.symbol;
+}
+
+function fmtCost(usd: number): string {
+  const n = usd * CURRENCY_RATE;
+  // Adjust precision per currency magnitude. JPY/KRW have no minor unit.
+  const noMinor = ['JPY', 'KRW', 'NGN', 'INR'].includes(CURRENCY_CODE);
+  if (noMinor) {
+    if (n >= 100_000) return `${CURRENCY_SYMBOL}${(n/1000).toFixed(0)}K`;
+    return `${CURRENCY_SYMBOL}${Math.round(n).toLocaleString('en-US')}`;
+  }
+  if (n >= 1000) return `${CURRENCY_SYMBOL}${n.toFixed(0)}`;
+  if (n >= 100)  return `${CURRENCY_SYMBOL}${n.toFixed(1)}`;
+  if (n >= 1)    return `${CURRENCY_SYMBOL}${n.toFixed(2)}`;
+  return `${CURRENCY_SYMBOL}${n.toFixed(3)}`;
 }
 function fmtTok(n: number): string {
   if (n >= 1_000_000) return (n/1_000_000).toFixed(1) + 'M';
@@ -206,8 +276,9 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
     C.red;
 
   // ── Header ────────────────────────────────────────────────────────────
+  const ccTag = CURRENCY_CODE === 'USD' ? '' : ` · ${CURRENCY_CODE}`;
   console.log();
-  console.log(`  ${C.bold}${C.yellow}◆ claude-cost${C.reset}  ${C.dim}· ${label}${C.reset}`);
+  console.log(`  ${C.bold}${C.yellow}◆ claude-cost${C.reset}  ${C.dim}· ${label}${ccTag}${C.reset}`);
   console.log();
   console.log(`  ${C.bold}${C.green}${fmtCost(totals.costUsd)}${C.reset} total  ${C.dim}·${C.reset}  ${fmtTok(totals.tokensOut)} out  ${C.dim}·${C.reset}  ${fmtTok(totals.tokensIn)} in`);
   console.log(`  ${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}${C.dim} cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`);
@@ -255,7 +326,27 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('claude-cost 0.1.0');
+    console.log('claude-cost 0.1.1');
+    return;
+  }
+
+  setCurrency(args.currency, args.customRate);
+
+  if (args.showPricing) {
+    console.log();
+    console.log(`  ${C.bold}${C.yellow}◆ pricing table${C.reset}  ${C.dim}· per 1M tokens · in ${CURRENCY_CODE}${C.reset}`);
+    console.log();
+    const cols = `${pad('model', 10)}  ${lpad('input', 8)}  ${lpad('output', 8)}  ${lpad('cache R', 8)}  ${lpad('cache W', 8)}`;
+    console.log(`  ${C.dim}${cols}${C.reset}`);
+    for (const [name, p] of Object.entries(PRICING)) {
+      console.log(`  ${pad(name, 10)}  ${lpad(fmtCost(p.in), 8)}  ${lpad(fmtCost(p.out), 8)}  ${lpad(fmtCost(p.cacheRead), 8)}  ${lpad(fmtCost(p.cacheWrite), 8)}`);
+    }
+    console.log();
+    console.log(`  ${C.dim}rates as of ship time. update src/parse.ts if Anthropic changes.${C.reset}`);
+    if (CURRENCY_CODE !== 'USD') {
+      console.log(`  ${C.dim}1 USD = ${CURRENCY_RATE} ${CURRENCY_CODE} (approximate, baked at v0.1.1)${C.reset}`);
+    }
+    console.log();
     return;
   }
 
@@ -286,8 +377,11 @@ async function main() {
     console.log(JSON.stringify({
       range: rangeLabel(args.range, args.since),
       groupBy: args.groupBy,
+      currency: CURRENCY_CODE,
+      currencyRate: CURRENCY_RATE,
       totals: {
         costUsd: round(totals.costUsd, 4),
+        cost: round(totals.costUsd * CURRENCY_RATE, 4),
         tokensIn: totals.tokensIn,
         tokensOut: totals.tokensOut,
         cacheRead: totals.cacheRead,
@@ -299,6 +393,7 @@ async function main() {
         key: b.key,
         label: b.label,
         costUsd: round(b.costUsd, 4),
+        cost: round(b.costUsd * CURRENCY_RATE, 4),
         tokensIn: b.tokensIn,
         tokensOut: b.tokensOut,
         cacheRead: b.cacheRead,

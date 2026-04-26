@@ -4,8 +4,13 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 
-// Pricing (USD per 1M tokens). Adjust if Anthropic's rates change.
-// Defaults match Sonnet for unknown models — conservative.
+// Pricing (USD per 1M tokens). Per Anthropic's published rates as of 2026-04.
+// Override at runtime via ~/.claude-cost.json or CLAUDE_COST_PRICING env var.
+//
+// SUBSCRIPTION USERS NOTE: if you're on Claude Max/Team flat-rate, what you
+// actually pay is $200/month (or whatever your plan is), not these rates.
+// This tool computes the API-equivalent cost — useful for "am I overusing
+// my plan" or "what would this cost without the subscription".
 export const PRICING: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
   haiku:  { in:  1, out:  5, cacheRead: 0.10, cacheWrite:  1.25 },
   sonnet: { in:  3, out: 15, cacheRead: 0.30, cacheWrite:  3.75 },
@@ -15,10 +20,38 @@ export const PRICING: Record<string, { in: number; out: number; cacheRead: numbe
 export function priceFor(model: string | undefined) {
   if (!model) return PRICING.sonnet;
   const m = model.toLowerCase();
-  if (m.includes('opus'))  return PRICING.opus;
-  if (m.includes('haiku')) return PRICING.haiku;
+  // Order matters: most specific first.
+  if (m.includes('opus'))   return PRICING.opus;
+  if (m.includes('haiku'))  return PRICING.haiku;
+  if (m.includes('sonnet')) return PRICING.sonnet;
+  // Synthetic / unknown — assume sonnet (conservative).
   return PRICING.sonnet;
 }
+
+// Approximate USD → other currency rates as of 2026-04. NOT live — refresh
+// via env var if you need accuracy. Override: CLAUDE_COST_RATE=0.92 (your fx).
+export const CURRENCIES: Record<string, { rate: number; symbol: string; name: string }> = {
+  USD: { rate: 1.00,    symbol: '$',   name: 'US Dollar' },
+  EUR: { rate: 0.92,    symbol: '€',   name: 'Euro' },
+  GBP: { rate: 0.78,    symbol: '£',   name: 'British Pound' },
+  CAD: { rate: 1.36,    symbol: 'C$',  name: 'Canadian Dollar' },
+  AUD: { rate: 1.51,    symbol: 'A$',  name: 'Australian Dollar' },
+  JPY: { rate: 152.00,  symbol: '¥',   name: 'Japanese Yen' },
+  CNY: { rate: 7.20,    symbol: '¥',   name: 'Chinese Yuan' },
+  INR: { rate: 83.50,   symbol: '₹',   name: 'Indian Rupee' },
+  BRL: { rate: 5.10,    symbol: 'R$',  name: 'Brazilian Real' },
+  MXN: { rate: 17.10,   symbol: 'Mex$', name: 'Mexican Peso' },
+  CHF: { rate: 0.90,    symbol: 'CHF', name: 'Swiss Franc' },
+  SEK: { rate: 10.50,   symbol: 'kr',  name: 'Swedish Krona' },
+  NOK: { rate: 10.80,   symbol: 'kr',  name: 'Norwegian Krone' },
+  KRW: { rate: 1380.00, symbol: '₩',   name: 'South Korean Won' },
+  SGD: { rate: 1.34,    symbol: 'S$',  name: 'Singapore Dollar' },
+  AED: { rate: 3.67,    symbol: 'AED', name: 'UAE Dirham' },
+  SAR: { rate: 3.75,    symbol: 'SAR', name: 'Saudi Riyal' },
+  TRY: { rate: 32.50,   symbol: '₺',   name: 'Turkish Lira' },
+  ZAR: { rate: 18.50,   symbol: 'R',   name: 'South African Rand' },
+  NGN: { rate: 1500.00, symbol: '₦',   name: 'Nigerian Naira' },
+};
 
 export type Session = {
   id: string;
