@@ -339,7 +339,9 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
       rows.push(`${C.dim}${C.yellow}⚠ on a Claude subscription? add --plan max-20x to reframe${C.reset}`);
     }
   } else {
-    // Subscription: reframe — show plan price + overage + value ratio.
+    // Subscription: show plan price + API-equivalent + neutral multiple.
+    // The multiple is a TOKEN-COST ratio, NOT a "value" or "intelligence" ratio.
+    // Same model, same outputs — just different billing path.
     const planUsd = plan.usdPerMonth;
     const overage = args.overageUsd ?? 0;
     const actualPaid = planUsd + overage;
@@ -347,15 +349,20 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
     const ratio = actualPaid > 0 ? apiEquiv / actualPaid : 0;
 
     rows.push(`${C.bold}${C.green}${fmtCost(actualPaid)}${C.reset}  ${C.dim}what you actually pay${overage > 0 ? ` (${fmtCost(planUsd)} plan + ${fmtCost(overage)} overage)` : ` (${plan.name})`}${C.reset}`);
-    rows.push(`${C.bold}${C.cyan}${fmtCost(apiEquiv)}${C.reset}  ${C.dim}API-equivalent value (raw token cost)${C.reset}`);
+    rows.push(`${C.bold}${C.cyan}${fmtCost(apiEquiv)}${C.reset}  ${C.dim}token-cost at raw API rates (same model, different billing)${C.reset}`);
     if (ratio > 1) {
-      rows.push(`${C.bold}${C.yellow}${ratio.toFixed(1)}×${C.reset}  ${C.dim}value ratio · ${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}${C.dim} cache · ${totals.sessions} sessions${C.reset}`);
-    } else {
-      rows.push(`${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}  ${C.dim}cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`);
+      rows.push(`${C.dim}${ratio.toFixed(1)}×${C.reset}  ${C.dim}per-token cost ratio (not a value/capability ratio)${C.reset}`);
+    }
+    rows.push(`${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}  ${C.dim}cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`);
+
+    if (totalCacheRatio > 0.7) {
+      rows.push('');
+      rows.push(`${C.dim}note: ${(totalCacheRatio*100).toFixed(0)}% cache means most "raw cost" is repeated context.${C.reset}`);
+      rows.push(`${C.dim}      at API rates you'd architect prompts to use less of it.${C.reset}`);
     }
     if (overage === 0 && args.plan !== 'free') {
       rows.push('');
-      rows.push(`${C.dim}grab your overage from claude.ai → Settings → Usage, pass --overage N${C.reset}`);
+      rows.push(`${C.dim}grab actual overage from claude.ai → Settings → Usage, pass --overage N${C.reset}`);
     }
   }
 
@@ -438,7 +445,7 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('claude-cost 0.1.3');
+    console.log('claude-cost 0.1.4');
     return;
   }
 

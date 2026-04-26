@@ -9,20 +9,24 @@ $ claude-cost --plan max-5x --overage 57.29
   │  ◆ claude-cost · last 30 days · Claude Max (5×)                          │
   │                                                                          │
   │  $157.3  what you actually pay ($100.0 plan + $57.29 overage)            │
-  │  $8657   API-equivalent value (raw token cost)                           │
-  │  55.0×   value ratio · 97% cache · 31 sessions                           │
+  │  $8657   token-cost at raw API rates (same model, different billing)     │
+  │  55.0×   per-token cost ratio (not a value/capability ratio)             │
+  │  97%     cache hit · 31 sessions · 13 projects                           │
+  │                                                                          │
+  │  note: 97% cache means most "raw cost" is repeated context.              │
+  │        at API rates you'd architect prompts to use less of it.           │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
-  ▸   $5995  ███████████████████   69%  ~/DemoPortal               5 sess ·  97% cache
-     $698.0  ██▎                    8%  ~/quant                    1 sess ·  97% cache
-     $693.4  ██▎                    8%  ~/code/claude-cost         1 sess ·  98% cache
-     $483.7  █▌                     6%  ~                         11 sess ·  94% cache
-     $221.1  ▊                      3%  ~/Desktop/cortex-report    1 sess ·  97% cache
+  ▸   $5995  ███████████████████   69%  ~/DemoPortal               5 sess
+     $698.0  ██▎                    8%  ~/quant                    1 sess
+     $693.4  ██▎                    8%  ~/code/claude-cost         1 sess
+     $483.7  █▌                     6%  ~                         11 sess
+     $221.1  ▊                      3%  ~/Desktop/cortex-report    1 sess
 
   + 8 more · try --all
 ```
 
-Real output. Two numbers matter: **what you pay** (your plan + overage) and **API-equivalent value** (what those tokens would cost at raw API rates). The ratio tells you how much your subscription is doing for you.
+Two numbers matter: **what you pay** (plan + overage) and **token-cost at API rates** (what those tokens would cost on the API plan). The multiple tells you the *billing* difference — not that you got 55× smarter outputs. Same model, same answers; subscription just removes the per-token meter.
 
 ---
 
@@ -116,6 +120,8 @@ These match Anthropic's published rates as of v0.1.0. Unknown models default to 
 **Dollar amounts are calculated**, not received. Caveats:
 
 1. **API-rate vs subscription-rate.** By default the tool computes what your tokens would cost at raw API rates. If you're on Claude Pro / Max / Team, you're not paying that — you're paying your subscription. **Use `--plan max-5x` (or your tier) to reframe.** With `--overage N` you can also pass the actual overage from your claude.ai billing page so the "what you actually pay" number is exact.
+
+   ⚠️ **Don't read "55× ratio" as "55× smarter."** Same model, same outputs. The multiple is a per-token billing comparison, distorted by cache reads (which would be architected differently on the API plan) and by the fact that subscription users use Claude more freely because there's no meter ticking.
 2. **Pricing is hardcoded** at ship time. If Anthropic changes rates, output drifts until you `git pull` (or override prices via env vars).
 3. **Currency rates are approximate**, baked at v0.1.1. For accuracy, set `CLAUDE_COST_RATE` from a live FX source.
 4. **Model name matching is fuzzy** — `claude-3-5-sonnet` and `claude-sonnet-4-7` both get sonnet rates. Off by 10–30% on legacy sessions.
