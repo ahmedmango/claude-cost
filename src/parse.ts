@@ -5,16 +5,15 @@ import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 
 // Pricing (USD per 1M tokens). Per Anthropic's published rates as of 2026-04.
-// Override at runtime via ~/.vibecosting.json or CLAUDE_COST_PRICING env var.
 //
 // SUBSCRIPTION USERS NOTE: if you're on Claude Max/Team flat-rate, what you
 // actually pay is $200/month (or whatever your plan is), not these rates.
 // This tool computes the API-equivalent cost — useful for "am I overusing
 // my plan" or "what would this cost without the subscription".
-export const PRICING: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
-  haiku:  { in:  1, out:  5, cacheRead: 0.10, cacheWrite:  1.25 },
-  sonnet: { in:  3, out: 15, cacheRead: 0.30, cacheWrite:  3.75 },
-  opus:   { in: 15, out: 75, cacheRead: 1.50, cacheWrite: 18.75 },
+export const PRICING: Record<string, { in: number; out: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number }> = {
+  haiku:  { in:  0.80, out:  4, cacheRead: 0.08, cacheWrite5m:  1.00, cacheWrite1h:  1.60 },
+  sonnet: { in:  3.00, out: 15, cacheRead: 0.30, cacheWrite5m:  3.75, cacheWrite1h:  6.00 },
+  opus:   { in: 15.00, out: 75, cacheRead: 1.50, cacheWrite5m: 18.75, cacheWrite1h: 30.00 },
 };
 
 export function priceFor(model: string | undefined) {
@@ -79,6 +78,8 @@ export type Session = {
   tokensOut: number;
   cacheRead: number;
   cacheCreate: number;
+  cacheCreate5m: number;
+  cacheCreate1h: number;
   costUsd: number;
   events: number;
   toolUses: number;
@@ -120,6 +121,7 @@ export function parseSession(filePath: string): Session | null {
     models: new Set(),
     modelEvents: new Map(),
     tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheCreate: 0,
+    cacheCreate5m: 0, cacheCreate1h: 0,
     costUsd: 0, events: 0, toolUses: 0, errors: 0,
     toolCounts: new Map(),
     firstTs: Number.POSITIVE_INFINITY,
@@ -128,6 +130,8 @@ export function parseSession(filePath: string): Session | null {
     topMessageCostUsd: 0,
     topMessageTs: 0,
   };
+
+  const assistantEvents: any[] = [];
 
   for (const line of text.split('\n')) {
     if (!line) continue;
@@ -148,48 +152,7 @@ export function parseSession(filePath: string): Session | null {
     }
 
     if (obj.type === 'assistant') {
-      s.events += 1;
-      const msg = obj.message;
-      let turnCost = 0;
-      if (msg?.usage) {
-        const u = msg.usage;
-        const model = msg.model || 'unknown';
-        s.model = model;
-        s.models.add(model);
-        s.modelEvents.set(model, (s.modelEvents.get(model) ?? 0) + 1);
-        const p = priceFor(model);
-        const inT  = Number(u.input_tokens) || 0;
-        const outT = Number(u.output_tokens) || 0;
-        const cR   = Number(u.cache_read_input_tokens) || 0;
-        const cC   = Number(u.cache_creation_input_tokens) || 0;
-        s.tokensIn    += inT;
-        s.tokensOut   += outT;
-        s.cacheRead   += cR;
-        s.cacheCreate += cC;
-        turnCost  = (inT * p.in + outT * p.out + cR * p.cacheRead + cC * p.cacheWrite) / 1_000_000;
-        s.costUsd += turnCost;
-      }
-      // Track most expensive single message
-      if (turnCost > s.topMessageCostUsd) {
-        s.topMessageCostUsd = turnCost;
-        s.topMessageTs = ts;
-      }
-      // Bucket cost by hour-of-day (local time of the timestamp)
-      if (ts) {
-        const h = new Date(ts).getHours();
-        s.hourBuckets[h] += turnCost;
-      }
-      // tool_use sub-blocks
-      const content = msg?.content;
-      if (Array.isArray(content)) {
-        for (const b of content) {
-          if (b?.type === 'tool_use') {
-            s.toolUses += 1;
-            const tn = (b.name || 'unknown') as string;
-            s.toolCounts.set(tn, (s.toolCounts.get(tn) ?? 0) + 1);
-          }
-        }
-      }
+      assistantEvents.push(obj);
     } else if (obj.type === 'user') {
       s.events += 1;
       const content = obj.message?.content;
@@ -203,6 +166,47 @@ export function parseSession(filePath: string): Session | null {
     }
   }
 
+  for (const obj of dedupeAssistantEvents(assistantEvents)) {
+    s.events += 1;
+    const msg = obj.message;
+    const ts = obj.timestamp ? Date.parse(obj.timestamp) : 0;
+    let turnCost = 0;
+    if (msg?.usage) {
+      const u = msg.usage;
+      const model = msg.model || 'unknown';
+      s.model = model;
+      s.models.add(model);
+      s.modelEvents.set(model, (s.modelEvents.get(model) ?? 0) + 1);
+      const usage = normalizeUsage(u);
+      s.tokensIn       += usage.input;
+      s.tokensOut      += usage.output;
+      s.cacheRead      += usage.cacheRead;
+      s.cacheCreate    += usage.cacheCreate;
+      s.cacheCreate5m  += usage.cacheCreate5m;
+      s.cacheCreate1h  += usage.cacheCreate1h;
+      turnCost = costForUsage(model, usage);
+      s.costUsd += turnCost;
+    }
+    if (turnCost > s.topMessageCostUsd) {
+      s.topMessageCostUsd = turnCost;
+      s.topMessageTs = ts;
+    }
+    if (ts) {
+      const h = new Date(ts).getHours();
+      s.hourBuckets[h] += turnCost;
+    }
+    const content = msg?.content;
+    if (Array.isArray(content)) {
+      for (const b of content) {
+        if (b?.type === 'tool_use') {
+          s.toolUses += 1;
+          const tn = (b.name || 'unknown') as string;
+          s.toolCounts.set(tn, (s.toolCounts.get(tn) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
   if (!Number.isFinite(s.firstTs)) s.firstTs = 0;
   // Compute dominantModel: model with most events
   let topN = 0;
@@ -210,6 +214,63 @@ export function parseSession(filePath: string): Session | null {
     if (n > topN) { topN = n; s.dominantModel = m; }
   }
   return s;
+}
+
+type NormalizedUsage = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreate: number;
+  cacheCreate5m: number;
+  cacheCreate1h: number;
+};
+
+function normalizeUsage(u: any): NormalizedUsage {
+  const input = Number(u.input_tokens) || 0;
+  const output = Number(u.output_tokens) || 0;
+  const cacheRead = Number(u.cache_read_input_tokens) || 0;
+  const cacheCreate = Number(u.cache_creation_input_tokens) || 0;
+  const cacheCreate5m = Number(u.cache_creation?.ephemeral_5m_input_tokens) || 0;
+  const cacheCreate1h = Number(u.cache_creation?.ephemeral_1h_input_tokens) || 0;
+  const knownCacheCreate = cacheCreate5m + cacheCreate1h;
+  const unknownCacheCreate = Math.max(0, cacheCreate - knownCacheCreate);
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheCreate,
+    cacheCreate5m: cacheCreate5m + unknownCacheCreate,
+    cacheCreate1h,
+  };
+}
+
+function usageTokenTotal(u: any): number {
+  const n = normalizeUsage(u);
+  return n.input + n.output + n.cacheRead + n.cacheCreate;
+}
+
+function dedupeAssistantEvents(events: any[]): any[] {
+  const byResponse = new Map<string, any>();
+  for (let i = 0; i < events.length; i++) {
+    const obj = events[i];
+    const key = String(obj.requestId || obj.message?.id || obj.uuid || i);
+    const prev = byResponse.get(key);
+    if (!prev || usageTokenTotal(obj.message?.usage) >= usageTokenTotal(prev.message?.usage)) {
+      byResponse.set(key, obj);
+    }
+  }
+  return Array.from(byResponse.values());
+}
+
+function costForUsage(model: string | undefined, u: NormalizedUsage): number {
+  const p = priceFor(model);
+  return (
+    u.input * p.in +
+    u.output * p.out +
+    u.cacheRead * p.cacheRead +
+    u.cacheCreate5m * p.cacheWrite5m +
+    u.cacheCreate1h * p.cacheWrite1h
+  ) / 1_000_000;
 }
 
 // Short-display name for a model: "claude-opus-4-7-20251201" → "opus-4-7"
@@ -224,17 +285,22 @@ export function shortModel(m: string | undefined): string {
 export function loadAllSessions(): Session[] {
   if (!existsSync(PROJECTS_DIR)) return [];
   const out: Session[] = [];
-  for (const dir of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
-    if (!dir.isDirectory()) continue;
-    const dirPath = join(PROJECTS_DIR, dir.name);
+
+  function visit(dirPath: string) {
     let entries;
     try { entries = readdirSync(dirPath, { withFileTypes: true }); }
-    catch { continue; }
+    catch { return; }
     for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-      const s = parseSession(join(dirPath, entry.name));
-      if (s) out.push(s);
+      const p = join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        visit(p);
+      } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        const s = parseSession(p);
+        if (s) out.push(s);
+      }
     }
   }
+
+  visit(PROJECTS_DIR);
   return out;
 }

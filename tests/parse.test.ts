@@ -19,7 +19,7 @@ function writeFixture(events: any[]): { filePath: string } {
 
 describe('priceFor', () => {
   test('opus', () => expect(priceFor('claude-opus-4-7').in).toBe(15));
-  test('haiku', () => expect(priceFor('claude-haiku-4-5').in).toBe(1));
+  test('haiku', () => expect(priceFor('claude-haiku-4-5').in).toBe(0.8));
   test('sonnet default', () => expect(priceFor('claude-sonnet-4-6').in).toBe(3));
   test('unknown model defaults to sonnet', () => expect(priceFor('mystery').in).toBe(3));
   test('undefined defaults to sonnet', () => expect(priceFor(undefined).in).toBe(3));
@@ -85,7 +85,7 @@ describe('parseSession — pricing math', () => {
     expect(s.costUsd).toBeCloseTo(75, 2);
   });
 
-  test('haiku: 100K cache_read = $0.01', () => {
+  test('haiku: 100K cache_read = $0.008', () => {
     const { filePath } = writeFixture([
       {
         type: 'assistant',
@@ -101,8 +101,65 @@ describe('parseSession — pricing math', () => {
       },
     ]);
     const s = parseSession(filePath)!;
-    // 100K * $0.10 / 1M = $0.01
-    expect(s.costUsd).toBeCloseTo(0.01, 4);
+    // 100K * $0.08 / 1M = $0.008
+    expect(s.costUsd).toBeCloseTo(0.008, 4);
+  });
+
+  test('prices 1-hour cache creation separately when present', () => {
+    const { filePath } = writeFixture([
+      {
+        type: 'assistant',
+        sessionId: 'abc',
+        timestamp: '2026-04-26T00:00:00Z',
+        requestId: 'req-1',
+        message: {
+          model: 'claude-sonnet-4-6',
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 1_000_000,
+            cache_creation: {
+              ephemeral_5m_input_tokens: 250_000,
+              ephemeral_1h_input_tokens: 750_000,
+            },
+          },
+        },
+      },
+    ]);
+    const s = parseSession(filePath)!;
+    // 250K * $3.75 + 750K * $6 = $5.4375
+    expect(s.costUsd).toBeCloseTo(5.4375, 4);
+    expect(s.cacheCreate5m).toBe(250_000);
+    expect(s.cacheCreate1h).toBe(750_000);
+  });
+
+  test('deduplicates repeated assistant snapshots for the same request', () => {
+    const { filePath } = writeFixture([
+      {
+        type: 'assistant',
+        sessionId: 'abc',
+        timestamp: '2026-04-26T00:00:00Z',
+        requestId: 'req-1',
+        message: {
+          model: 'claude-sonnet-4-6',
+          usage: { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        },
+      },
+      {
+        type: 'assistant',
+        sessionId: 'abc',
+        timestamp: '2026-04-26T00:00:01Z',
+        requestId: 'req-1',
+        message: {
+          model: 'claude-sonnet-4-6',
+          usage: { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        },
+      },
+    ]);
+    const s = parseSession(filePath)!;
+    expect(s.costUsd).toBeCloseTo(3, 2);
+    expect(s.events).toBe(1);
   });
 
   test('sums across multiple assistant events', () => {
