@@ -263,9 +263,35 @@ function bucket(sessions: Session[], by: Args['groupBy']): Bucket[] {
   return Array.from(map.values()).sort((a, b) => b.costUsd - a.costUsd);
 }
 
+// ─── BAR CHART HELPERS ───────────────────────────────────────────────────
+const EIGHTHS = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+
+// Inline horizontal bar. fraction in [0..1], integer width chars wide.
+function bar(fraction: number, width: number): string {
+  const f = Math.max(0, Math.min(1, fraction));
+  const filled = f * width;
+  const full = Math.floor(filled);
+  const remainder = Math.round((filled - full) * 8);
+  let s = '█'.repeat(full);
+  if (remainder > 0 && full < width) s += EIGHTHS[remainder];
+  return s.padEnd(width, ' ');
+}
+
+// Sparkline — one block char per value, height ∈ ▁▂▃▄▅▆▇█
+const SPARKS = ['▁','▂','▃','▄','▅','▆','▇','█'];
+function sparkline(values: number[]): string {
+  if (values.length === 0) return '';
+  const max = Math.max(...values);
+  if (max === 0) return SPARKS[0].repeat(values.length);
+  return values.map(v => {
+    const idx = Math.min(SPARKS.length - 1, Math.floor((v / max) * (SPARKS.length - 1) + 0.5));
+    return SPARKS[idx];
+  }).join('');
+}
+
 // ─── RENDER ───────────────────────────────────────────────────────────────
 function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
-  const term = process.stdout.columns || 80;
+  const term = Math.max(70, Math.min(120, process.stdout.columns || 92));
   const totalCacheRatio = (totals.cacheRead + totals.cacheCreate + totals.tokensIn) > 0
     ? totals.cacheRead / (totals.cacheRead + totals.cacheCreate + totals.tokensIn)
     : 0;
@@ -275,46 +301,91 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
     totalCacheRatio >= 0.4 ? C.yellow :
     C.red;
 
-  // ── Header ────────────────────────────────────────────────────────────
+  // ── BOXED SUMMARY ─────────────────────────────────────────────────────
   const ccTag = CURRENCY_CODE === 'USD' ? '' : ` · ${CURRENCY_CODE}`;
+  const headerText = `◆ claude-cost · ${label}${ccTag}`;
+  const boxWidth = Math.max(56, Math.min(72, term - 4));
+  const lineH = '─'.repeat(boxWidth);
+  const top    = `╭${lineH}╮`;
+  const bot    = `╰${lineH}╯`;
+  const innerPad = boxWidth;
+
+  const rows = [
+    `${C.bold}${C.yellow}${headerText}${C.reset}`,
+    '',
+    `${C.bold}${C.green}${fmtCost(totals.costUsd)}${C.reset}  ${C.dim}total spend${C.reset}`,
+    `${C.bold}${C.cyan}${fmtTok(totals.tokensOut)}${C.reset}  ${C.dim}output tokens · ${fmtTok(totals.tokensIn)} input${C.reset}`,
+    `${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}  ${C.dim}cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`,
+  ];
+
   console.log();
-  console.log(`  ${C.bold}${C.yellow}◆ claude-cost${C.reset}  ${C.dim}· ${label}${ccTag}${C.reset}`);
-  console.log();
-  console.log(`  ${C.bold}${C.green}${fmtCost(totals.costUsd)}${C.reset} total  ${C.dim}·${C.reset}  ${fmtTok(totals.tokensOut)} out  ${C.dim}·${C.reset}  ${fmtTok(totals.tokensIn)} in`);
-  console.log(`  ${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}${C.dim} cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`);
+  console.log(`  ${C.dim}${top}${C.reset}`);
+  for (const r of rows) {
+    const visible = stripAnsi(r);
+    const padding = ' '.repeat(Math.max(0, innerPad - visible.length - 4));
+    console.log(`  ${C.dim}│${C.reset}  ${r}${padding}  ${C.dim}│${C.reset}`);
+  }
+  console.log(`  ${C.dim}${bot}${C.reset}`);
   console.log();
 
-  // ── Table ─────────────────────────────────────────────────────────────
-  const top = buckets.slice(0, args.top);
-  if (top.length === 0) {
+  // ── TABLE ─────────────────────────────────────────────────────────────
+  const visible = buckets.slice(0, args.top);
+  if (visible.length === 0) {
     console.log(`  ${C.dim}(no activity in window)${C.reset}`);
     console.log();
     return;
   }
 
-  const labelWidth = Math.min(38, Math.max(12, ...top.map(b => b.label.length)));
-  const sep = `  ${C.dim}${'─'.repeat(Math.min(70, term - 4))}${C.reset}`;
-  console.log(sep);
+  // For day grouping, also emit a sparkline summary above the table.
+  if (args.groupBy === 'day') {
+    // Sort by date ascending for the sparkline
+    const sorted = [...buckets].sort((a, b) => a.key.localeCompare(b.key));
+    const series = sorted.map(b => b.costUsd);
+    const spark = sparkline(series);
+    const days = sorted.length;
+    console.log(`  ${C.dim}trend (${days}d)${C.reset}  ${C.cyan}${spark}${C.reset}`);
+    console.log();
+  }
 
-  for (const b of top) {
+  const maxCost = Math.max(...visible.map(b => b.costUsd));
+  const labelWidth = Math.min(34, Math.max(14, ...visible.map(b => b.label.length)));
+  const barWidth = Math.max(10, Math.min(22, term - labelWidth - 50));
+
+  for (let i = 0; i < visible.length; i++) {
+    const b = visible[i];
+    const isTop = i === 0;
+    const share = totals.costUsd > 0 ? b.costUsd / totals.costUsd : 0;
+    const barFrac = maxCost > 0 ? b.costUsd / maxCost : 0;
+
     const cost = lpad(fmtCost(b.costUsd), 7);
-    const tok  = lpad(fmtTok(b.tokensOut), 6);
     const lbl  = pad(truncate(b.label, labelWidth), labelWidth);
     const sess = lpad(String(b.sessions), 3);
-    const evs  = lpad(String(b.events), 4);
+
     const ratio = (b.cacheRead + b.cacheCreate + b.tokensIn) > 0
       ? b.cacheRead / (b.cacheRead + b.cacheCreate + b.tokensIn)
       : 0;
-    const ratioStr = ratio > 0 ? `${(ratio*100).toFixed(0)}%` : '— ';
+    const ratioStr = ratio > 0 ? lpad(`${(ratio*100).toFixed(0)}%`, 4) : '  — ';
     const ratioCol = ratio >= 0.7 ? C.green : ratio >= 0.4 ? C.yellow : ratio > 0 ? C.red : C.dim;
-    console.log(`   ${C.bold}${C.green}${cost}${C.reset}  ${C.cyan}${lbl}${C.reset}  ${C.dim}${tok} out · ${evs} ev · ${sess} sess · cache ${C.reset}${ratioCol}${ratioStr}${C.reset}`);
-  }
-  console.log(sep);
 
-  if (buckets.length > top.length) {
-    console.log(`  ${C.dim}${buckets.length - top.length} more · ${args.range === 'all' ? 'try --top 50' : 'try --all'}${C.reset}`);
+    const sharePct = lpad(`${(share*100).toFixed(0)}%`, 4);
+    const barCol = isTop ? C.bold + C.yellow : C.cyan;
+    const costCol = isTop ? C.bold + C.green : C.green;
+
+    const barStr = `${barCol}${bar(barFrac, barWidth)}${C.reset}`;
+    const rank = isTop ? `${C.bold}${C.yellow}▸${C.reset}` : ' ';
+
+    console.log(`  ${rank} ${costCol}${cost}${C.reset}  ${barStr}  ${C.dim}${sharePct}${C.reset}  ${C.cyan}${lbl}${C.reset}  ${C.dim}${sess} sess · ${ratioCol}${ratioStr}${C.reset}${C.dim} cache${C.reset}`);
+  }
+
+  if (buckets.length > visible.length) {
+    console.log();
+    console.log(`  ${C.dim}+ ${buckets.length - visible.length} more · ${args.range === 'all' ? 'try --top 50' : 'try --all'}${C.reset}`);
   }
   console.log();
+}
+
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────
@@ -326,7 +397,7 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('claude-cost 0.1.1');
+    console.log('claude-cost 0.1.2');
     return;
   }
 
