@@ -225,6 +225,7 @@ function fmtCost(usd: number): string {
   return `${CURRENCY_SYMBOL}${n.toFixed(3)}`;
 }
 function fmtTok(n: number): string {
+  if (n >= 1_000_000_000) return (n/1_000_000_000).toFixed(1) + 'B';
   if (n >= 1_000_000) return (n/1_000_000).toFixed(1) + 'M';
   if (n >= 1_000)     return (n/1_000).toFixed(1) + 'K';
   return String(n);
@@ -249,13 +250,15 @@ type Bucket = {
   tokensOut: number;
   cacheRead: number;
   cacheCreate: number;
+  cacheCreate5m: number;
+  cacheCreate1h: number;
   events: number;
   sessions: number;
   models?: Set<string>;
 };
 
 function newBucket(key: string, label: string): Bucket {
-  return { key, label, costUsd: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheCreate: 0, events: 0, sessions: 0, models: new Set() };
+  return { key, label, costUsd: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheCreate: 0, cacheCreate5m: 0, cacheCreate1h: 0, events: 0, sessions: 0, models: new Set() };
 }
 
 function bucket(sessions: Session[], by: Args['groupBy']): Bucket[] {
@@ -321,6 +324,8 @@ function bucket(sessions: Session[], by: Args['groupBy']): Bucket[] {
     b.tokensOut    += s.tokensOut;
     b.cacheRead    += s.cacheRead;
     b.cacheCreate  += s.cacheCreate;
+    b.cacheCreate5m += s.cacheCreate5m;
+    b.cacheCreate1h += s.cacheCreate1h;
     b.events       += s.events;
     b.sessions     += 1;
     if (s.dominantModel) b.models!.add(s.dominantModel);
@@ -387,7 +392,8 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
   if (args.plan === 'api') {
     // Pay-per-token: the totals.costUsd IS what you're paying.
     rows.push(`${C.bold}${C.green}${fmtCost(totals.costUsd)}${C.reset}  ${C.dim}total spend (API rates)${C.reset}`);
-    rows.push(`${C.bold}${C.cyan}${fmtTok(totals.tokensOut)}${C.reset}  ${C.dim}output tokens · ${fmtTok(totals.tokensIn)} input${C.reset}`);
+    rows.push(`${C.bold}${C.cyan}${fmtTok(totals.tokensOut)}${C.reset}  ${C.dim}output tokens · ${fmtTok(totals.tokensIn)} fresh input${C.reset}`);
+    rows.push(`${C.bold}${C.cyan}${fmtTok(totals.cacheRead)}${C.reset}  ${C.dim}cache read · ${fmtTok(totals.cacheCreate)} cache write${C.reset}`);
     rows.push(`${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}  ${C.dim}cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`);
     if ((args as any)._previousLabel) {
       rows.push(`${(args as any)._previousColor}${(args as any)._previousLabel}${C.reset}  ${C.dim}vs previous period${C.reset}`);
@@ -411,6 +417,7 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
 
     rows.push(`${C.bold}${C.green}${fmtCost(actualPaid)}${C.reset}  ${C.dim}what you actually pay${overage > 0 ? ` (${fmtCost(planUsd)} plan + ${fmtCost(overage)} overage)` : ` (${plan.name})`}${C.reset}`);
     rows.push(`${C.bold}${C.cyan}${fmtCost(apiEquiv)}${C.reset}  ${C.dim}token-cost at raw API rates (same model, different billing)${C.reset}`);
+    rows.push(`${C.bold}${C.cyan}${fmtTok(totals.cacheRead)}${C.reset}  ${C.dim}cache read · ${fmtTok(totals.cacheCreate)} cache write${C.reset}`);
     if (ratio > 1) {
       rows.push(`${C.dim}${ratio.toFixed(1)}×${C.reset}  ${C.dim}per-token cost ratio (not a value/capability ratio)${C.reset}`);
     }
@@ -579,10 +586,10 @@ async function main() {
     console.log();
     console.log(`  ${C.bold}${C.yellow}◆ pricing table${C.reset}  ${C.dim}· per 1M tokens · in ${CURRENCY_CODE}${C.reset}`);
     console.log();
-    const cols = `${pad('model', 10)}  ${lpad('input', 8)}  ${lpad('output', 8)}  ${lpad('cache R', 8)}  ${lpad('cache W', 8)}`;
+    const cols = `${pad('model', 10)}  ${lpad('input', 8)}  ${lpad('output', 8)}  ${lpad('cache R', 8)}  ${lpad('cache W5', 8)}  ${lpad('cache W1h', 9)}`;
     console.log(`  ${C.dim}${cols}${C.reset}`);
     for (const [name, p] of Object.entries(PRICING)) {
-      console.log(`  ${pad(name, 10)}  ${lpad(fmtCost(p.in), 8)}  ${lpad(fmtCost(p.out), 8)}  ${lpad(fmtCost(p.cacheRead), 8)}  ${lpad(fmtCost(p.cacheWrite), 8)}`);
+      console.log(`  ${pad(name, 10)}  ${lpad(fmtCost(p.in), 8)}  ${lpad(fmtCost(p.out), 8)}  ${lpad(fmtCost(p.cacheRead), 8)}  ${lpad(fmtCost(p.cacheWrite5m), 8)}  ${lpad(fmtCost(p.cacheWrite1h), 9)}`);
     }
     console.log();
     console.log(`  ${C.dim}rates as of ship time. update src/parse.ts if Anthropic changes.${C.reset}`);
@@ -660,10 +667,12 @@ async function main() {
     acc.tokensOut    += s.tokensOut;
     acc.cacheRead    += s.cacheRead;
     acc.cacheCreate  += s.cacheCreate;
+    acc.cacheCreate5m += s.cacheCreate5m;
+    acc.cacheCreate1h += s.cacheCreate1h;
     acc.events       += s.events;
     acc.sessions     += 1;
     return acc;
-  }, { key: 'all', label: 'total', costUsd: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheCreate: 0, events: 0, sessions: 0 });
+  }, { key: 'all', label: 'total', costUsd: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheCreate: 0, cacheCreate5m: 0, cacheCreate1h: 0, events: 0, sessions: 0 });
 
   if (args.json) {
     const plan = PLANS[args.plan] ?? PLANS.api;
@@ -685,6 +694,9 @@ async function main() {
         tokensOut: totals.tokensOut,
         cacheRead: totals.cacheRead,
         cacheCreate: totals.cacheCreate,
+        cacheCreate5m: totals.cacheCreate5m,
+        cacheCreate1h: totals.cacheCreate1h,
+        totalInputTokens: totals.tokensIn + totals.cacheRead + totals.cacheCreate,
         events: totals.events,
         sessions: totals.sessions,
       },
@@ -697,6 +709,9 @@ async function main() {
         tokensOut: b.tokensOut,
         cacheRead: b.cacheRead,
         cacheCreate: b.cacheCreate,
+        cacheCreate5m: b.cacheCreate5m,
+        cacheCreate1h: b.cacheCreate1h,
+        totalInputTokens: b.tokensIn + b.cacheRead + b.cacheCreate,
         events: b.events,
         sessions: b.sessions,
         models: b.models ? Array.from(b.models) : undefined,

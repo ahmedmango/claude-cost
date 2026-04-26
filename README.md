@@ -162,6 +162,9 @@ vibecosting --top 1 --json | jq -r '.rows[0].costUsd'
 | **$**            | USD spend at Anthropic's published rates (or your currency)   |
 | **bar / %**      | share of total                                                |
 | **out**          | output tokens (the expensive ones)                            |
+| **fresh input**  | uncached input tokens from Anthropic's response                |
+| **cache read**   | cached input tokens reused by Claude Code                     |
+| **cache write**  | input tokens written into prompt cache (5m and 1h priced separately) |
 | **ev**           | "events" — assistant turns + user turns                       |
 | **sess**         | distinct sessions in this bucket                              |
 | **cache N%**     | cache_read / (cache_read + cache_create + tokens_in)          |
@@ -181,6 +184,7 @@ A high cache hit rate (≥70%, green) means most context is being reused — pay
 2. **Pricing is hardcoded** at ship time. If Anthropic changes rates, output drifts until next release.
 3. **Currency rates are approximate** — set `CLAUDE_COST_RATE` for live FX.
 4. **Model name matching is fuzzy** — `claude-3-5-sonnet` and `claude-sonnet-4-7` both get sonnet rates. Off by 10–30% on legacy sessions.
+5. **Claude Code transcript shape can change.** vibecosting de-duplicates repeated assistant snapshots by request id and recursively includes nested subagent transcripts, but the source of truth for actual charges remains Anthropic's billing page.
 
 Run `vibecosting --show-pricing` to see the exact rate table being used.
 
