@@ -28,6 +28,19 @@ export function priceFor(model: string | undefined) {
   return PRICING.sonnet;
 }
 
+// Anthropic subscription plan prices (USD/month). Use to reframe the
+// token total as "what you'd pay raw vs what your plan covers".
+// Update if Anthropic changes pricing. Source: anthropic.com pricing page.
+export const PLANS: Record<string, { name: string; usdPerMonth: number; note: string }> = {
+  free:        { name: 'Claude Free',          usdPerMonth: 0,   note: 'free tier' },
+  pro:         { name: 'Claude Pro',           usdPerMonth: 20,  note: '5× free limits' },
+  'max-5x':    { name: 'Claude Max (5×)',      usdPerMonth: 100, note: '5× Pro limits' },
+  'max-20x':   { name: 'Claude Max (20×)',     usdPerMonth: 200, note: '20× Pro limits' },
+  team:        { name: 'Claude Team',          usdPerMonth: 30,  note: 'per-seat (premium)' },
+  enterprise:  { name: 'Claude Enterprise',    usdPerMonth: 60,  note: 'per-seat estimate' },
+  api:         { name: 'API (no subscription)', usdPerMonth: 0,  note: 'pay per token' },
+};
+
 // Approximate USD → other currency rates as of 2026-04. NOT live — refresh
 // via env var if you need accuracy. Override: CLAUDE_COST_RATE=0.92 (your fx).
 export const CURRENCIES: Record<string, { rate: number; symbol: string; name: string }> = {

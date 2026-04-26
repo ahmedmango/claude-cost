@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // claude-cost — see what you've spent on Claude Code.
 
-import { loadAllSessions, shortPath, CURRENCIES, PRICING, type Session } from './parse.ts';
+import { loadAllSessions, shortPath, CURRENCIES, PRICING, PLANS, type Session } from './parse.ts';
 
 // ─── ANSI ────────────────────────────────────────────────────────────────
 const isTTY = process.stdout.isTTY;
@@ -32,6 +32,8 @@ type Args = {
   currency: string;       // ISO code: USD, EUR, GBP, ...
   customRate?: number;    // override rate (per 1 USD)
   showPricing: boolean;
+  plan: string;           // 'api' (default), 'pro', 'max-5x', 'max-20x', 'team', etc.
+  overageUsd?: number;    // user-supplied actual overage from Anthropic billing
 };
 
 function parseArgs(argv: string[]): Args {
@@ -45,6 +47,8 @@ function parseArgs(argv: string[]): Args {
     currency: (process.env.CLAUDE_COST_CURRENCY || 'USD').toUpperCase(),
     customRate: process.env.CLAUDE_COST_RATE ? Number(process.env.CLAUDE_COST_RATE) : undefined,
     showPricing: false,
+    plan: process.env.CLAUDE_COST_PLAN || 'api',
+    overageUsd: process.env.CLAUDE_COST_OVERAGE ? Number(process.env.CLAUDE_COST_OVERAGE) : undefined,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
@@ -65,6 +69,8 @@ function parseArgs(argv: string[]): Args {
     else if (v === '--currency' && argv[i+1]) a.currency = argv[++i].toUpperCase();
     else if (v === '--rate' && argv[i+1]) a.customRate = Number(argv[++i]) || undefined;
     else if (v === '--show-pricing') a.showPricing = true;
+    else if ((v === '--plan' || v === '--subscription') && argv[i+1]) a.plan = argv[++i].toLowerCase();
+    else if (v === '--overage' && argv[i+1]) a.overageUsd = Number(argv[++i]) || undefined;
     else if (v === '--json' || v === '-j') a.json = true;
     else if (v === '--help' || v === '-h') a.help = true;
     else if (v === '--version' || v === '-v') a.version = true;
@@ -96,7 +102,14 @@ ${C.bold}GROUPING${C.reset} (default: --by-project)
   --by-day          group by calendar day
   --by-session      one row per session
 
-${C.bold}CURRENCY${C.reset} (default: USD; override with $CLAUDE_COST_CURRENCY)
+${C.bold}PLAN${C.reset} ${C.dim}(default: api — pay-per-token)${C.reset}
+  --plan PLAN       free / pro / max-5x / max-20x / team / enterprise / api
+                    Reframes output: "you pay \$200, equivalent API spend \$X".
+                    Same as --subscription. Or env $CLAUDE_COST_PLAN.
+  --overage N       extra USD billed beyond your plan (from Anthropic dash).
+                    Or env $CLAUDE_COST_OVERAGE.
+
+${C.bold}CURRENCY${C.reset} ${C.dim}(default: USD; override with $CLAUDE_COST_CURRENCY)${C.reset}
   --currency CODE   convert to USD/EUR/GBP/CAD/AUD/JPY/CNY/INR/BRL/MXN/
                     CHF/SEK/NOK/KRW/SGD/AED/SAR/TRY/ZAR/NGN
                     (rates approximate, baked at v0.1.1)
@@ -303,20 +316,48 @@ function render(buckets: Bucket[], totals: Bucket, args: Args, label: string) {
 
   // ── BOXED SUMMARY ─────────────────────────────────────────────────────
   const ccTag = CURRENCY_CODE === 'USD' ? '' : ` · ${CURRENCY_CODE}`;
-  const headerText = `◆ claude-cost · ${label}${ccTag}`;
-  const boxWidth = Math.max(56, Math.min(72, term - 4));
+  const plan = PLANS[args.plan] ?? PLANS.api;
+  const planTag = args.plan !== 'api' ? ` · ${plan.name}` : '';
+  const headerText = `◆ claude-cost · ${label}${ccTag}${planTag}`;
+  const boxWidth = Math.max(56, Math.min(74, term - 4));
   const lineH = '─'.repeat(boxWidth);
   const top    = `╭${lineH}╮`;
   const bot    = `╰${lineH}╯`;
   const innerPad = boxWidth;
 
-  const rows = [
-    `${C.bold}${C.yellow}${headerText}${C.reset}`,
-    '',
-    `${C.bold}${C.green}${fmtCost(totals.costUsd)}${C.reset}  ${C.dim}total spend${C.reset}`,
-    `${C.bold}${C.cyan}${fmtTok(totals.tokensOut)}${C.reset}  ${C.dim}output tokens · ${fmtTok(totals.tokensIn)} input${C.reset}`,
-    `${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}  ${C.dim}cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`,
-  ];
+  const rows: string[] = [];
+  rows.push(`${C.bold}${C.yellow}${headerText}${C.reset}`);
+  rows.push('');
+
+  if (args.plan === 'api') {
+    // Pay-per-token: the totals.costUsd IS what you're paying.
+    rows.push(`${C.bold}${C.green}${fmtCost(totals.costUsd)}${C.reset}  ${C.dim}total spend (API rates)${C.reset}`);
+    rows.push(`${C.bold}${C.cyan}${fmtTok(totals.tokensOut)}${C.reset}  ${C.dim}output tokens · ${fmtTok(totals.tokensIn)} input${C.reset}`);
+    rows.push(`${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}  ${C.dim}cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`);
+    if (totals.costUsd > 50) {
+      rows.push('');
+      rows.push(`${C.dim}${C.yellow}⚠ on a Claude subscription? add --plan max-20x to reframe${C.reset}`);
+    }
+  } else {
+    // Subscription: reframe — show plan price + overage + value ratio.
+    const planUsd = plan.usdPerMonth;
+    const overage = args.overageUsd ?? 0;
+    const actualPaid = planUsd + overage;
+    const apiEquiv = totals.costUsd;
+    const ratio = actualPaid > 0 ? apiEquiv / actualPaid : 0;
+
+    rows.push(`${C.bold}${C.green}${fmtCost(actualPaid)}${C.reset}  ${C.dim}what you actually pay${overage > 0 ? ` (${fmtCost(planUsd)} plan + ${fmtCost(overage)} overage)` : ` (${plan.name})`}${C.reset}`);
+    rows.push(`${C.bold}${C.cyan}${fmtCost(apiEquiv)}${C.reset}  ${C.dim}API-equivalent value (raw token cost)${C.reset}`);
+    if (ratio > 1) {
+      rows.push(`${C.bold}${C.yellow}${ratio.toFixed(1)}×${C.reset}  ${C.dim}value ratio · ${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}${C.dim} cache · ${totals.sessions} sessions${C.reset}`);
+    } else {
+      rows.push(`${cacheColor}${(totalCacheRatio*100).toFixed(0)}%${C.reset}  ${C.dim}cache hit · ${totals.sessions} sessions · ${buckets.length} ${args.groupBy}${args.groupBy === 'session' ? '' : 's'}${C.reset}`);
+    }
+    if (overage === 0 && args.plan !== 'free') {
+      rows.push('');
+      rows.push(`${C.dim}grab your overage from claude.ai → Settings → Usage, pass --overage N${C.reset}`);
+    }
+  }
 
   console.log();
   console.log(`  ${C.dim}${top}${C.reset}`);
@@ -397,7 +438,7 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('claude-cost 0.1.2');
+    console.log('claude-cost 0.1.3');
     return;
   }
 
@@ -445,12 +486,19 @@ async function main() {
   }, { key: 'all', label: 'total', costUsd: 0, tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheCreate: 0, events: 0, sessions: 0 });
 
   if (args.json) {
+    const plan = PLANS[args.plan] ?? PLANS.api;
+    const overage = args.overageUsd ?? 0;
+    const actualPaidUsd = args.plan === 'api' ? totals.costUsd : plan.usdPerMonth + overage;
     console.log(JSON.stringify({
       range: rangeLabel(args.range, args.since),
       groupBy: args.groupBy,
       currency: CURRENCY_CODE,
       currencyRate: CURRENCY_RATE,
+      plan: { id: args.plan, name: plan.name, usdPerMonth: plan.usdPerMonth, overageUsd: overage, actualPaidUsd },
       totals: {
+        apiEquivCostUsd: round(totals.costUsd, 4),
+        actualPaidUsd: round(actualPaidUsd, 4),
+        valueRatio: actualPaidUsd > 0 ? round(totals.costUsd / actualPaidUsd, 2) : 0,
         costUsd: round(totals.costUsd, 4),
         cost: round(totals.costUsd * CURRENCY_RATE, 4),
         tokensIn: totals.tokensIn,

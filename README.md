@@ -3,29 +3,26 @@
 > See exactly how much you've spent on Claude Code. Per project, per session, per model.
 
 ```
-$ claude-cost --month
+$ claude-cost --plan max-5x --overage 57.29
 
-  ◆ claude-cost  · last 30 days
+  ╭──────────────────────────────────────────────────────────────────────────╮
+  │  ◆ claude-cost · last 30 days · Claude Max (5×)                          │
+  │                                                                          │
+  │  $157.3  what you actually pay ($100.0 plan + $57.29 overage)            │
+  │  $8657   API-equivalent value (raw token cost)                           │
+  │  55.0×   value ratio · 97% cache · 31 sessions                           │
+  ╰──────────────────────────────────────────────────────────────────────────╯
 
-  $8505 total  ·  8.8M out  ·  36.8K in
-  97% cache hit · 30 sessions · 13 projects
+  ▸   $5995  ███████████████████   69%  ~/DemoPortal               5 sess ·  97% cache
+     $698.0  ██▎                    8%  ~/quant                    1 sess ·  97% cache
+     $693.4  ██▎                    8%  ~/code/claude-cost         1 sess ·  98% cache
+     $483.7  █▌                     6%  ~                         11 sess ·  94% cache
+     $221.1  ▊                      3%  ~/Desktop/cortex-report    1 sess ·  97% cache
 
-  ──────────────────────────────────────────────────────────────────────
-     $5962  ~/DemoPortal               4.2M out · 11630 ev ·   5 sess · cache 97%
-     $698   ~/quant                  448.4K out · 1530 ev ·   1 sess · cache 97%
-     $602   ~/code/claude-cost         1.1M out · 1244 ev ·   1 sess · cache 97%
-     $471   ~                        887.2K out · 1717 ev ·  10 sess · cache 94%
-     $221   ~/Desktop/cortex-report  426.7K out ·  705 ev ·   1 sess · cache 97%
-     $191   ~/picklepointhq          637.3K out · 1008 ev ·   4 sess · cache 96%
-     $109   ~/code/town-watcher      305.7K out ·  591 ev ·   2 sess · cache 97%
-     $85.11 ~/cnct-integrations      480.2K out ·  257 ev ·   1 sess · cache 94%
-     $74.58 ~/Downloads              135.3K out ·  182 ev ·   1 sess · cache 82%
-     $62.45 ~/doo-clients             81.9K out ·  159 ev ·   1 sess · cache 96%
-  ──────────────────────────────────────────────────────────────────────
-  3 more · try --all
+  + 8 more · try --all
 ```
 
-That's a real screenshot of someone running it on their machine. They had no idea.
+Real output. Two numbers matter: **what you pay** (your plan + overage) and **API-equivalent value** (what those tokens would cost at raw API rates). The ratio tells you how much your subscription is doing for you.
 
 ---
 
@@ -63,6 +60,8 @@ claude-cost --by-model            # group by model instead of project
 claude-cost --by-day              # group by calendar day
 claude-cost --by-session          # one row per session
 
+claude-cost --plan max-5x         # reframe for subscribers (free/pro/max-5x/max-20x/team/enterprise)
+claude-cost --plan max-5x --overage 57.29   # also include your billed overage from claude.ai
 claude-cost --currency EUR        # convert (USD/EUR/GBP/CAD/JPY/INR/...)
 claude-cost --rate 0.91           # custom fx rate, 1 USD = 0.91 target
 claude-cost --show-pricing        # print the model price table
@@ -116,12 +115,26 @@ These match Anthropic's published rates as of v0.1.0. Unknown models default to 
 
 **Dollar amounts are calculated**, not received. Caveats:
 
-1. **Subscription users** (Claude Max / Team flat-rate plans) actually pay their monthly subscription, not these per-token totals. This tool computes what your tokens *would* cost at API rates. Useful for "am I overusing my plan?" — not for "what was on my card statement".
-2. **Pricing is hardcoded** at ship time. If Anthropic changes rates, output drifts until you `git pull` (or override prices via `~/.claude-cost.json`).
+1. **API-rate vs subscription-rate.** By default the tool computes what your tokens would cost at raw API rates. If you're on Claude Pro / Max / Team, you're not paying that — you're paying your subscription. **Use `--plan max-5x` (or your tier) to reframe.** With `--overage N` you can also pass the actual overage from your claude.ai billing page so the "what you actually pay" number is exact.
+2. **Pricing is hardcoded** at ship time. If Anthropic changes rates, output drifts until you `git pull` (or override prices via env vars).
 3. **Currency rates are approximate**, baked at v0.1.1. For accuracy, set `CLAUDE_COST_RATE` from a live FX source.
 4. **Model name matching is fuzzy** — `claude-3-5-sonnet` and `claude-sonnet-4-7` both get sonnet rates. Off by 10–30% on legacy sessions.
 
 Run `claude-cost --show-pricing` to see the exact rate table being used.
+
+### Plans reference
+
+| `--plan` | what | $/mo |
+|---|---|---|
+| `api` (default) | pay-per-token, no subscription | 0 |
+| `free` | Claude free tier | 0 |
+| `pro` | Claude Pro | 20 |
+| `max-5x` | Claude Max 5× | 100 |
+| `max-20x` | Claude Max 20× | 200 |
+| `team` | Claude Team (per-seat premium) | 30 |
+| `enterprise` | per-seat estimate | 60 |
+
+Update prices in `src/parse.ts → PLANS` if Anthropic changes them.
 
 ## What it doesn't do
 
