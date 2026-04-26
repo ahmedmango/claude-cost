@@ -1,0 +1,44 @@
+{
+  "name": "claude-cost",
+  "version": "0.1.0",
+  "description": "See exactly how much you've spent on Claude Code, per project, per session, per model. Reads your local ~/.claude/projects/ transcripts. No API key, no telemetry.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Ahmed Haffadh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ahmedmango/claude-cost"
+  },
+  "homepage": "https://github.com/ahmedmango/claude-cost",
+  "bugs": "https://github.com/ahmedmango/claude-cost/issues",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "cost",
+    "tokens",
+    "billing",
+    "cli",
+    "developer-tools"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bin": {
+    "claude-cost": "bin/claude-cost.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}
