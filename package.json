@@ -1,6 +1,6 @@
 {
   "name": "vibecosting",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "What's vibe coding costing you? A 250-line CLI that reads your ~/.claude/projects transcripts and shows actual spend, plan value, and cache hit rate per project.",
   "type": "module",
   "license": "MIT",
