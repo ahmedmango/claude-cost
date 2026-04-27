@@ -88,8 +88,11 @@ export type Session = {
   firstTs: number;                // first event timestamp (ms)
   lastTs: number;                 // last event timestamp (ms)
   hourBuckets: number[];          // 24-element: cost per hour-of-day (0..23)
+  dayBuckets: Map<string, number>; // 'YYYY-MM-DD' -> cost
   topMessageCostUsd: number;      // most expensive single assistant turn
   topMessageTs: number;           // when that turn happened
+  toolOnlyTurns: number;          // assistant turns with only tool_use blocks
+  textTurns: number;              // assistant turns with text content
 };
 
 const HOME = homedir();
@@ -127,8 +130,11 @@ export function parseSession(filePath: string): Session | null {
     firstTs: Number.POSITIVE_INFINITY,
     lastTs: 0,
     hourBuckets: new Array(24).fill(0),
+    dayBuckets: new Map(),
     topMessageCostUsd: 0,
     topMessageTs: 0,
+    toolOnlyTurns: 0,
+    textTurns: 0,
   };
 
   const assistantEvents: any[] = [];
@@ -194,17 +200,25 @@ export function parseSession(filePath: string): Session | null {
     if (ts) {
       const h = new Date(ts).getHours();
       s.hourBuckets[h] += turnCost;
+      const day = new Date(ts).toISOString().slice(0, 10);
+      s.dayBuckets.set(day, (s.dayBuckets.get(day) ?? 0) + turnCost);
     }
     const content = msg?.content;
+    let hasToolUse = false, hasText = false;
     if (Array.isArray(content)) {
       for (const b of content) {
         if (b?.type === 'tool_use') {
           s.toolUses += 1;
+          hasToolUse = true;
           const tn = (b.name || 'unknown') as string;
           s.toolCounts.set(tn, (s.toolCounts.get(tn) ?? 0) + 1);
+        } else if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+          hasText = true;
         }
       }
     }
+    if (hasToolUse && !hasText) s.toolOnlyTurns += 1;
+    if (hasText) s.textTurns += 1;
   }
 
   if (!Number.isFinite(s.firstTs)) s.firstTs = 0;

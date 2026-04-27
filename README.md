@@ -53,6 +53,76 @@ This is not your subscription bill. It is the API-rate shadow price of the token
 
 The big number is usually cache, not fresh input. In the sample above, only 90.3K tokens were fresh input, but 3.9B cached tokens were read back into context. That is why long coding sessions can look absurdly expensive at API rates.
 
+## Coach mode — `--advise`
+
+Beyond receipts: vibecosting can read patterns in your usage and tell you what to fix.
+
+```
+$ vibecosting --advise --plan max-5x
+
+  ◆ vibecosting · advice  · last 30 days
+  grounded in your 104 sessions, 26017 events, $9674 of API-equivalent cost
+
+  ✓ CACHE HIT 97%  — good
+  ✓ MODEL MIX  — 34% Haiku  (good discipline)
+  ✓ ERROR RATE 2.2% — disciplined
+  ✓ PROJECT FOCUS — shipping 70% on top project (healthy)
+
+  ◆ MOST EXPENSIVE TURN  — single response $29.71
+    When: 2026-04-16 11:35  ·  Where: ~/work/dashboard
+    Probably a "read the entire codebase" moment. Worth scoping smaller.
+
+  ◆ PLAN FIT — Claude Max (5×)
+    You used ~62× your plan price in API-equivalent value.
+    You're a heavy user. Stay on this tier or above.
+```
+
+The advice is grounded in **your local data only** — no community averages, no AI calls, no third-party comparison. If a tip can't be backed by your numbers, it doesn't appear.
+
+## Recap mode — `--wrapped`
+
+Spotify-Wrapped-style card. Great for screenshots / month-end posts.
+
+```
+  ╭────────────────────────────────────────────────────────╮
+  │                  ◆ YOUR LAST 30 DAYS                   │
+  │                                                        │
+  │             $9674  token-cost at API rates             │
+  │             $157   what you actually paid              │
+  │                                                        │
+  │   your dominant project ──  ~/picklepoint (70%)        │
+  │       most expensive day ────  2026-04-23 at $1038     │
+  │       peak coding hour ──────  21:00 ($926 total)      │
+  │         favorite tool ─────────  Bash · 3,875 calls    │
+  │           cache wizardry ────────  97%                 │
+  │       output tokens ─────────  7.2M tokens shipped     │
+  ╰────────────────────────────────────────────────────────╯
+```
+
+## Live mode — `--watch`
+
+Refresh every 5s in place. Watch costs tick as you code. ANSI-clear redraws — works in any terminal.
+
+```
+$ vibecosting --watch
+[normal report]
+↻ refreshed · ▲ +$0.41 since last tick · ctrl-c to stop
+```
+
+## First-run setup
+
+Skip the every-time `--plan max-5x --overage X` flags — save them once:
+
+```
+$ vibecosting setup
+  Plan [api]: 4              ← max-5x
+  Monthly overage [0]: 57.29
+  Display currency [USD]:
+  ✓ saved to ~/.vibecosting.json
+```
+
+Now `vibecosting` uses those defaults. Override per-run with flags or env vars (`CLAUDE_COST_PLAN`, `CLAUDE_COST_OVERAGE`, `CLAUDE_COST_CURRENCY`).
+
 ## More views
 
 ```

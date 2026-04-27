@@ -1,7 +1,23 @@
 #!/usr/bin/env bun
 // vibecosting — see what you've spent on Claude Code.
 
-import { loadAllSessions, shortPath, shortModel, CURRENCIES, PRICING, PLANS, type Session } from './parse.ts';
+import { loadAllSessions, shortPath, shortModel, CURRENCIES, PRICING, PLANS, priceFor, type Session } from './parse.ts';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+const CONFIG_PATH = join(homedir(), '.vibecosting.json');
+
+type Config = { plan?: string; overage?: number; currency?: string };
+
+function loadConfig(): Config {
+  if (!existsSync(CONFIG_PATH)) return {};
+  try { return JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) as Config; }
+  catch { return {}; }
+}
+function saveConfig(c: Config): void {
+  writeFileSync(CONFIG_PATH, JSON.stringify(c, null, 2));
+}
 
 // ─── ANSI ────────────────────────────────────────────────────────────────
 const isTTY = process.stdout.isTTY;
@@ -36,9 +52,23 @@ type Args = {
   overageUsd?: number;
   vsPrevious: boolean;
   forecast: boolean;
+  watch: boolean;
+  wrapped: boolean;
+  advise: boolean;
+  subcommand?: string;       // 'setup' | undefined
 };
 
 function parseArgs(argv: string[]): Args {
+  // Subcommand sniff (must be first arg, non-flag): vibecosting setup
+  let subcommand: string | undefined;
+  if (argv.length > 0 && !argv[0].startsWith('-')) {
+    if (['setup', 'config'].includes(argv[0])) {
+      subcommand = argv[0];
+      argv = argv.slice(1);
+    }
+  }
+  // Load saved config; flags / env override.
+  const cfg = loadConfig();
   const a: Args = {
     range: 'month',
     groupBy: 'project',
@@ -46,13 +76,19 @@ function parseArgs(argv: string[]): Args {
     json: false,
     help: false,
     version: false,
-    currency: (process.env.CLAUDE_COST_CURRENCY || 'USD').toUpperCase(),
+    currency: (process.env.CLAUDE_COST_CURRENCY || cfg.currency || 'USD').toUpperCase(),
     customRate: process.env.CLAUDE_COST_RATE ? Number(process.env.CLAUDE_COST_RATE) : undefined,
     showPricing: false,
-    plan: process.env.CLAUDE_COST_PLAN || 'api',
-    overageUsd: process.env.CLAUDE_COST_OVERAGE ? Number(process.env.CLAUDE_COST_OVERAGE) : undefined,
+    plan: process.env.CLAUDE_COST_PLAN || cfg.plan || 'api',
+    overageUsd:
+      process.env.CLAUDE_COST_OVERAGE ? Number(process.env.CLAUDE_COST_OVERAGE)
+      : cfg.overage,
     vsPrevious: false,
     forecast: false,
+    watch: false,
+    wrapped: false,
+    advise: false,
+    subcommand,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i];
@@ -73,6 +109,9 @@ function parseArgs(argv: string[]): Args {
     else if (v === '--by-tool')    a.groupBy = 'tool';
     else if (v === '--vs-previous' || v === '--vs') a.vsPrevious = true;
     else if (v === '--forecast') a.forecast = true;
+    else if (v === '--watch' || v === '-w') a.watch = true;
+    else if (v === '--wrapped') a.wrapped = true;
+    else if (v === '--advise' || v === '--advice' || v === '--audit') a.advise = true;
     else if (v === '--top' && argv[i+1]) a.top = Number(argv[++i]) || 10;
     else if (v === '--currency' && argv[i+1]) a.currency = argv[++i].toUpperCase();
     else if (v === '--rate' && argv[i+1]) a.customRate = Number(argv[++i]) || undefined;
@@ -128,6 +167,12 @@ ${C.bold}CURRENCY${C.reset} ${C.dim}(default: USD; override with $CLAUDE_COST_CU
   --rate N          override conversion rate (1 USD = N target)
                     or set $CLAUDE_COST_RATE
   --show-pricing    print the model price table being used
+
+${C.bold}MODES${C.reset}
+  ${C.cyan}vibecosting setup${C.reset}    interactive wizard, saves ~/.vibecosting.json
+  --advise          coaching analysis: cache, model mix, errors, plan fit
+  --wrapped         Spotify-Wrapped-style recap card (great for sharing)
+  --watch, -w       refresh every 5s in place; see live deltas as you code
 
 ${C.bold}OUTPUT${C.reset}
   --top N           show top N rows (default 10)
@@ -567,6 +612,367 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
+// =============================================================================
+// SETUP WIZARD — interactive plan/overage picker, saves ~/.vibecosting.json
+// =============================================================================
+async function readLine(prompt: string): Promise<string> {
+  process.stdout.write(prompt);
+  return new Promise((resolve) => {
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    process.stdin.once('data', (data) => {
+      process.stdin.pause();
+      resolve(String(data).trim());
+    });
+  });
+}
+
+async function runSetup() {
+  const existing = loadConfig();
+  console.log();
+  console.log(`  ${C.bold}${C.yellow}◆ vibecosting setup${C.reset}  ${C.dim}· saves to ~/.vibecosting.json${C.reset}`);
+  console.log();
+  console.log(`  ${C.dim}Pick a plan. Default value (in brackets) will be used if you press Enter.${C.reset}`);
+  console.log();
+
+  const planOptions = ['api', 'free', 'pro', 'max-5x', 'max-20x', 'team', 'enterprise'];
+  console.log('  ' + planOptions.map((p, i) => `${C.cyan}${i+1}${C.reset} ${p}`).join('   '));
+  const planDefault = existing.plan || 'api';
+  const planAns = (await readLine(`  Plan [${planDefault}]: `)).trim();
+  let plan = planDefault;
+  if (planAns) {
+    const idx = Number(planAns);
+    if (idx >= 1 && idx <= planOptions.length) plan = planOptions[idx-1];
+    else if (planOptions.includes(planAns)) plan = planAns;
+    else console.log(`  ${C.yellow}unrecognized plan, using ${planDefault}${C.reset}`);
+  }
+
+  const overageDefault = existing.overage ?? 0;
+  const overAns = (await readLine(`  Monthly overage in USD (from claude.ai → Settings → Usage) [${overageDefault}]: `)).trim();
+  const overage = overAns ? Number(overAns) || 0 : overageDefault;
+
+  const currencyDefault = existing.currency || 'USD';
+  const ccAns = (await readLine(`  Display currency [${currencyDefault}]: `)).trim().toUpperCase();
+  const currency = ccAns || currencyDefault;
+  if (!CURRENCIES[currency]) {
+    console.log(`  ${C.yellow}unknown currency, using USD${C.reset}`);
+  }
+
+  const cfg: Config = { plan, overage, currency: CURRENCIES[currency] ? currency : 'USD' };
+  saveConfig(cfg);
+  console.log();
+  console.log(`  ${C.green}✓${C.reset} saved to ${C.cyan}${CONFIG_PATH}${C.reset}`);
+  console.log(`  ${C.dim}you can now run \`vibecosting\` and it'll use these defaults.${C.reset}`);
+  console.log();
+}
+
+// =============================================================================
+// WRAPPED — Spotify-Wrapped-style recap card
+// =============================================================================
+function runWrapped(all: Session[], args: Args, label: string) {
+  const start = rangeStart(args.range, args.since);
+  const inRange = all.filter(s => (s.lastTs || s.firstTs) >= start);
+  if (inRange.length === 0) {
+    console.error(`${C.yellow}no activity in window${C.reset}`);
+    return;
+  }
+
+  // Aggregates
+  const totalCost = inRange.reduce((a, s) => a + s.costUsd, 0);
+  const tokensOut = inRange.reduce((a, s) => a + s.tokensOut, 0);
+  const cacheRead = inRange.reduce((a, s) => a + s.cacheRead, 0);
+  const cacheCreate = inRange.reduce((a, s) => a + s.cacheCreate, 0);
+  const tokensIn = inRange.reduce((a, s) => a + s.tokensIn, 0);
+  const cacheHit = (cacheRead + cacheCreate + tokensIn) > 0
+    ? cacheRead / (cacheRead + cacheCreate + tokensIn) : 0;
+
+  // Most expensive day
+  const dayTotals = new Map<string, number>();
+  for (const s of inRange) {
+    for (const [day, c] of s.dayBuckets) {
+      dayTotals.set(day, (dayTotals.get(day) ?? 0) + c);
+    }
+  }
+  let topDay = ['', 0] as [string, number];
+  for (const [d, c] of dayTotals) if (c > topDay[1]) topDay = [d, c];
+
+  // Peak hour
+  const hourTotals = new Array(24).fill(0);
+  for (const s of inRange) for (let h = 0; h < 24; h++) hourTotals[h] += s.hourBuckets[h];
+  let topHour = 0, topHourVal = 0;
+  for (let h = 0; h < 24; h++) if (hourTotals[h] > topHourVal) { topHourVal = hourTotals[h]; topHour = h; }
+
+  // Favorite tool
+  const toolTotals = new Map<string, number>();
+  for (const s of inRange) for (const [t, c] of s.toolCounts) toolTotals.set(t, (toolTotals.get(t) ?? 0) + c);
+  let topTool = ['', 0] as [string, number];
+  for (const [t, c] of toolTotals) if (c > topTool[1]) topTool = [t, c];
+
+  // Dominant project
+  const projTotals = new Map<string, number>();
+  for (const s of inRange) projTotals.set(s.projectPath, (projTotals.get(s.projectPath) ?? 0) + s.costUsd);
+  let topProj = ['', 0] as [string, number];
+  for (const [p, c] of projTotals) if (c > topProj[1]) topProj = [p, c];
+  const projShare = totalCost > 0 ? topProj[1] / totalCost : 0;
+
+  // Plan reframe
+  const plan = PLANS[args.plan] ?? PLANS.api;
+  const overage = args.overageUsd ?? 0;
+  const actualPaid = args.plan === 'api' ? totalCost : plan.usdPerMonth + overage;
+
+  const W = 70;
+  const line = '─'.repeat(W);
+  console.log();
+  console.log(`  ${C.dim}╭${line}╮${C.reset}`);
+  const center = (s: string) => {
+    const visible = s.replace(/\x1b\[[0-9;]*m/g, '');
+    const pad = Math.max(0, Math.floor((W - visible.length) / 2));
+    return ' '.repeat(pad) + s + ' '.repeat(W - pad - visible.length);
+  };
+  const row = (s: string) => console.log(`  ${C.dim}│${C.reset}${center(s)}${C.dim}│${C.reset}`);
+  row('');
+  row(`${C.bold}${C.yellow}◆ YOUR ${label.toUpperCase()}${C.reset}`);
+  row('');
+  row('');
+  row(`${C.bold}${C.green}${fmtCost(totalCost)}${C.reset}  ${C.dim}token-cost at API rates${C.reset}`);
+  if (args.plan !== 'api') {
+    row(`${C.bold}${C.cyan}${fmtCost(actualPaid)}${C.reset}  ${C.dim}what you actually paid${C.reset}`);
+  }
+  row('');
+  row(`${C.dim}your dominant project ──${C.reset}  ${C.bold}${C.cyan}${shortPath(topProj[0])}${C.reset}  ${C.dim}(${(projShare*100).toFixed(0)}% of cost)${C.reset}`);
+  row(`${C.dim}most expensive day ────${C.reset}  ${C.bold}${C.yellow}${topDay[0]}${C.reset}  ${C.dim}at ${fmtCost(topDay[1])}${C.reset}`);
+  row(`${C.dim}peak coding hour ──────${C.reset}  ${C.bold}${C.yellow}${String(topHour).padStart(2,'0')}:00${C.reset}  ${C.dim}(${fmtCost(topHourVal)} total)${C.reset}`);
+  row(`${C.dim}favorite tool ─────────${C.reset}  ${C.bold}${C.cyan}${topTool[0]}${C.reset}  ${C.dim}${topTool[1].toLocaleString('en-US')} calls${C.reset}`);
+  row(`${C.dim}cache wizardry ────────${C.reset}  ${C.bold}${C.green}${(cacheHit*100).toFixed(0)}%${C.reset}  ${C.dim}hit rate${C.reset}`);
+  row(`${C.dim}output tokens ─────────${C.reset}  ${C.bold}${C.cyan}${fmtTok(tokensOut)}${C.reset}  ${C.dim}tokens shipped${C.reset}`);
+  row('');
+  row(`${C.dim}share: github.com/ahmedmango/vibecosting${C.reset}`);
+  row('');
+  console.log(`  ${C.dim}╰${line}╯${C.reset}`);
+  console.log();
+}
+
+// =============================================================================
+// ADVISE — coaching analysis from local data
+// =============================================================================
+function runAdvise(all: Session[], args: Args, label: string) {
+  const start = rangeStart(args.range, args.since);
+  const inRange = all.filter(s => (s.lastTs || s.firstTs) >= start);
+  if (inRange.length === 0) {
+    console.error(`${C.yellow}no activity in window — nothing to analyze${C.reset}`);
+    return;
+  }
+
+  // Aggregates
+  const totalCost = inRange.reduce((a, s) => a + s.costUsd, 0);
+  const tokensIn  = inRange.reduce((a, s) => a + s.tokensIn, 0);
+  const cacheRead = inRange.reduce((a, s) => a + s.cacheRead, 0);
+  const cacheCreate = inRange.reduce((a, s) => a + s.cacheCreate, 0);
+  const cacheHit = (cacheRead + cacheCreate + tokensIn) > 0
+    ? cacheRead / (cacheRead + cacheCreate + tokensIn) : 0;
+
+  // Model dominance
+  const modelCount = new Map<string, number>();
+  for (const s of inRange) {
+    if (!s.dominantModel) continue;
+    modelCount.set(s.dominantModel, (modelCount.get(s.dominantModel) ?? 0) + 1);
+  }
+  const opusSessions = Array.from(modelCount.entries()).filter(([m]) => /opus/i.test(m)).reduce((a, [, c]) => a + c, 0);
+  const haikuSessions = Array.from(modelCount.entries()).filter(([m]) => /haiku/i.test(m)).reduce((a, [, c]) => a + c, 0);
+  const opusShare = inRange.length > 0 ? opusSessions / inRange.length : 0;
+  const haikuShare = inRange.length > 0 ? haikuSessions / inRange.length : 0;
+
+  // Tool-call mix
+  const toolTotals = new Map<string, number>();
+  for (const s of inRange) for (const [t, c] of s.toolCounts) toolTotals.set(t, (toolTotals.get(t) ?? 0) + c);
+  const totalTools = Array.from(toolTotals.values()).reduce((a, b) => a + b, 0);
+  const cheapTools = ['Read', 'Grep', 'Glob', 'Bash'];
+  const cheapCount = cheapTools.reduce((a, t) => a + (toolTotals.get(t) ?? 0), 0);
+  const cheapShare = totalTools > 0 ? cheapCount / totalTools : 0;
+
+  // Aborted sessions: <3 events
+  const aborted = inRange.filter(s => s.events < 3).length;
+  const abortedShare = inRange.length > 0 ? aborted / inRange.length : 0;
+
+  // Error rate
+  const totalEvents = inRange.reduce((a, s) => a + s.events, 0);
+  const totalErrors = inRange.reduce((a, s) => a + s.errors, 0);
+  const errorRate = totalEvents > 0 ? totalErrors / totalEvents : 0;
+
+  // Project concentration
+  const projTotals = new Map<string, number>();
+  for (const s of inRange) projTotals.set(s.projectPath, (projTotals.get(s.projectPath) ?? 0) + s.costUsd);
+  const projVals = Array.from(projTotals.values()).sort((a, b) => b - a);
+  const topProjShare = totalCost > 0 ? (projVals[0] ?? 0) / totalCost : 0;
+
+  // Top expensive turn
+  let topMsg: { ts: number; cost: number; project: string } | null = null;
+  for (const s of inRange) {
+    if (s.topMessageCostUsd > (topMsg?.cost ?? 0)) {
+      topMsg = { ts: s.topMessageTs, cost: s.topMessageCostUsd, project: shortPath(s.projectPath) };
+    }
+  }
+
+  // Tool-only turns share (signal that those could've been Haiku)
+  const toolOnlyTurns = inRange.reduce((a, s) => a + s.toolOnlyTurns, 0);
+  const textTurns     = inRange.reduce((a, s) => a + s.textTurns, 0);
+  const toolOnlyShare = (toolOnlyTurns + textTurns) > 0 ? toolOnlyTurns / (toolOnlyTurns + textTurns) : 0;
+
+  // ── Render ──
+  console.log();
+  console.log(`  ${C.bold}${C.yellow}◆ vibecosting · advice${C.reset}  ${C.dim}· ${label}${C.reset}`);
+  console.log(`  ${C.dim}grounded in your ${inRange.length} sessions, ${totalEvents} events, ${fmtCost(totalCost)} of API-equivalent cost${C.reset}`);
+  console.log();
+
+  const tip = (icon: string, color: string, title: string, lines: string[]) => {
+    console.log(`  ${color}${icon}${C.reset} ${C.bold}${title}${C.reset}`);
+    for (const l of lines) console.log(`    ${l}`);
+    console.log();
+  };
+
+  // 1. Cache
+  if (cacheHit < 0.7) {
+    const lossEstimate = totalCost * 0.3;   // very rough: half of "cost" is cache reads, low hit means re-buying that
+    tip('⚠', C.yellow, `CACHE HIT ${(cacheHit*100).toFixed(0)}%  ${C.dim}— heavy users typically hit 90%+${C.reset}`, [
+      `${C.dim}You're paying API-equivalent for context Claude could've reused.${C.reset}`,
+      `${C.dim}Rough cost-of-misses if billed at API rates: ~${fmtCost(lossEstimate)}.${C.reset}`,
+      `${C.cyan}▸${C.reset} Append to existing conversations rather than ${C.cyan}/clear${C.reset}-ing.`,
+      `${C.cyan}▸${C.reset} Use ${C.cyan}/compact${C.reset} when context grows; preserves cache better.`,
+    ]);
+  } else {
+    tip('✓', C.green, `CACHE HIT ${(cacheHit*100).toFixed(0)}%  ${C.dim}— good${C.reset}`, [
+      `${C.dim}Most context is being reused efficiently. Keep your conversation flow.${C.reset}`,
+    ]);
+  }
+
+  // 2. Model mix
+  if (opusShare > 0.6 && haikuShare < 0.05 && cheapShare > 0.5) {
+    // Many Opus sessions doing simple tool work. Estimate savings if cheap tool turns went to Haiku.
+    // Opus is ~19× Haiku per token. Conservative savings estimate.
+    const cheapToolSpend = totalCost * cheapShare;
+    const ifHaiku = cheapToolSpend / 19;
+    const savings = cheapToolSpend - ifHaiku;
+    tip('⚠', C.yellow, `MODEL MIX  ${C.dim}— ${(opusShare*100).toFixed(0)}% Opus, ${(haikuShare*100).toFixed(0)}% Haiku${C.reset}`, [
+      `${C.dim}${cheapTools.join(' / ')} together = ${(cheapShare*100).toFixed(0)}% of your tool calls.${C.reset}`,
+      `${C.dim}Those don't need Opus. At Haiku rates, that slice is ~19× cheaper.${C.reset}`,
+      `${C.dim}Rough savings if routed to Haiku: ~${fmtCost(savings)} of API-equivalent value.${C.reset}`,
+      `${C.cyan}▸${C.reset} Set up a per-task ${C.cyan}/model haiku${C.reset} workflow for greps/reads/checks.`,
+    ]);
+  } else if (haikuShare > 0.1) {
+    tip('✓', C.green, `MODEL MIX  ${C.dim}— ${(haikuShare*100).toFixed(0)}% Haiku${C.reset}`, [
+      `${C.dim}You're routing some work to cheaper models. Good discipline.${C.reset}`,
+    ]);
+  }
+
+  // 3. Aborted sessions
+  if (abortedShare > 0.15) {
+    tip('⚠', C.yellow, `ABANDONED STARTS  ${C.dim}— ${aborted}/${inRange.length} sessions <3 events (${(abortedShare*100).toFixed(0)}%)${C.reset}`, [
+      `${C.dim}Sessions you started but bailed on. Each still warmed cache + spawned overhead.${C.reset}`,
+      `${C.cyan}▸${C.reset} Plan the prompt before you ${C.cyan}/clear${C.reset}.`,
+      `${C.cyan}▸${C.reset} Use ${C.cyan}/resume${C.reset} when you come back to a project instead of starting fresh.`,
+    ]);
+  }
+
+  // 4. Error rate
+  if (errorRate > 0.04) {
+    tip('⚠', C.yellow, `ERROR RATE  ${C.dim}— ${(errorRate*100).toFixed(1)}%  (typical disciplined users < 2%)${C.reset}`, [
+      `${C.dim}${totalErrors} of ${totalEvents} events were tool failures or system errors.${C.reset}`,
+      `${C.dim}Each retry is a billable round-trip you didn't need.${C.reset}`,
+      `${C.cyan}▸${C.reset} Common culprits: bad ${C.cyan}grep${C.reset} patterns, wrong file paths, missing context.`,
+    ]);
+  } else {
+    tip('✓', C.green, `ERROR RATE  ${C.dim}${(errorRate*100).toFixed(1)}% — disciplined${C.reset}`, [
+      `${C.dim}Whatever you're doing prompt-wise, keep it.${C.reset}`,
+    ]);
+  }
+
+  // 5. Project focus
+  if (topProjShare > 0.85) {
+    tip('⚠', C.yellow, `PROJECT FOCUS  ${C.dim}— top project = ${(topProjShare*100).toFixed(0)}% of cost${C.reset}`, [
+      `${C.dim}Heavy concentration. Fine if intentional; risky if it's accidentally bloating one repo.${C.reset}`,
+    ]);
+  } else if (topProjShare > 0.5) {
+    tip('✓', C.green, `PROJECT FOCUS  ${C.dim}— shipping ${(topProjShare*100).toFixed(0)}% on top project${C.reset}`, [
+      `${C.dim}Healthy concentration.${C.reset}`,
+    ]);
+  } else {
+    tip('◆', C.cyan, `PROJECT SPREAD  ${C.dim}— top project only ${(topProjShare*100).toFixed(0)}% of cost${C.reset}`, [
+      `${C.dim}You're spread across many repos. Switching cost (cold caches) may be why ${C.reset}`,
+      `${C.dim}your cache hit isn't higher.${C.reset}`,
+    ]);
+  }
+
+  // 6. Top expensive single turn
+  if (topMsg && topMsg.cost > 5) {
+    const dt = new Date(topMsg.ts);
+    const when = `${dt.toISOString().slice(0,10)} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    tip('◆', C.cyan, `MOST EXPENSIVE TURN  ${C.dim}— single response ${C.reset}${C.bold}${fmtCost(topMsg.cost)}${C.reset}`, [
+      `${C.dim}When: ${when}  ·  Where: ${topMsg.project}${C.reset}`,
+      `${C.dim}Probably a "read the entire codebase and summarize" moment. Worth scoping smaller.${C.reset}`,
+    ]);
+  }
+
+  // 7. Plan fit (rough)
+  if (args.plan !== 'api') {
+    const plan = PLANS[args.plan] ?? PLANS.api;
+    const planCost = plan.usdPerMonth + (args.overageUsd ?? 0);
+    const ratio = planCost > 0 ? totalCost / planCost : 0;
+    if (ratio < 5) {
+      tip('◆', C.cyan, `PLAN FIT  ${C.dim}— ${plan.name}${C.reset}`, [
+        `${C.dim}You used ~${ratio.toFixed(1)}× your plan price in API-equivalent value.${C.reset}`,
+        `${C.dim}A lower-tier plan would probably suffice. Check claude.ai → Settings → Usage limits.${C.reset}`,
+      ]);
+    } else if (ratio > 30) {
+      tip('◆', C.cyan, `PLAN FIT  ${C.dim}— ${plan.name}${C.reset}`, [
+        `${C.dim}You used ~${ratio.toFixed(0)}× your plan price in API-equivalent value.${C.reset}`,
+        `${C.dim}You're a heavy user. Stay on this tier or above.${C.reset}`,
+      ]);
+    }
+  }
+
+  console.log(`  ${C.dim}note: estimates are approximate. they're directional, not exact dollars.${C.reset}`);
+  console.log();
+}
+
+// =============================================================================
+// WATCH — refresh every 5s in place
+// =============================================================================
+async function runWatch(args: Args) {
+  let prevCost = -1;
+  const refresh = async () => {
+    const all = loadAllSessions();
+    const start = rangeStart(args.range, args.since);
+    const inRange = all.filter(s => (s.lastTs || s.firstTs) >= start);
+    const buckets = bucket(inRange, args.groupBy);
+    const totals: Bucket = inRange.reduce((acc, s) => {
+      acc.costUsd += s.costUsd;
+      acc.tokensIn += s.tokensIn;
+      acc.tokensOut += s.tokensOut;
+      acc.cacheRead += s.cacheRead;
+      acc.cacheCreate += s.cacheCreate;
+      acc.events += s.events;
+      acc.sessions += 1;
+      return acc;
+    }, newBucket('all', 'total'));
+    const delta = prevCost >= 0 ? totals.costUsd - prevCost : 0;
+    // ANSI: clear screen + cursor home
+    process.stdout.write('\x1b[2J\x1b[H');
+    render(buckets, totals, args, rangeLabel(args.range, args.since));
+    if (prevCost >= 0) {
+      const arrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '·';
+      const col = delta > 0 ? C.green : delta < 0 ? C.red : C.dim;
+      console.log(`  ${C.dim}↻ refreshed · ${col}${arrow} ${delta >= 0 ? '+' : ''}${fmtCost(Math.abs(delta))}${C.reset}${C.dim} since last tick · ctrl-c to stop${C.reset}`);
+    } else {
+      console.log(`  ${C.dim}↻ watching · refreshes every 5s · ctrl-c to stop${C.reset}`);
+    }
+    prevCost = totals.costUsd;
+  };
+  await refresh();
+  setInterval(refresh, 5000);
+  // keep alive
+  await new Promise(() => {});
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────
 async function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -576,11 +982,23 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('vibecosting 0.3.2');
+    console.log('vibecosting 0.4.0');
+    return;
+  }
+
+  // Subcommand: setup wizard
+  if (args.subcommand === 'setup' || args.subcommand === 'config') {
+    await runSetup();
     return;
   }
 
   setCurrency(args.currency, args.customRate);
+
+  // --watch loops, separate flow
+  if (args.watch) {
+    await runWatch(args);
+    return;
+  }
 
   if (args.showPricing) {
     console.log();
@@ -605,6 +1023,18 @@ async function main() {
     console.error(`${C.yellow}No sessions found in ~/.claude/projects/${C.reset}`);
     console.error(`${C.dim}Have you run \`claude\` at least once?${C.reset}`);
     process.exit(1);
+  }
+
+  // --wrapped: pretty recap card
+  if (args.wrapped) {
+    runWrapped(all, args, rangeLabel(args.range, args.since));
+    return;
+  }
+
+  // --advise: coaching analysis
+  if (args.advise) {
+    runAdvise(all, args, rangeLabel(args.range, args.since));
+    return;
   }
 
   const start = rangeStart(args.range, args.since);
