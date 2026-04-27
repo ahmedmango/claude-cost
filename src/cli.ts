@@ -258,16 +258,18 @@ function setCurrency(code: string, customRate?: number) {
 
 function fmtCost(usd: number): string {
   const n = usd * CURRENCY_RATE;
-  // Adjust precision per currency magnitude. JPY/KRW have no minor unit.
   const noMinor = ['JPY', 'KRW', 'NGN', 'INR'].includes(CURRENCY_CODE);
   if (noMinor) {
-    if (n >= 100_000) return `${CURRENCY_SYMBOL}${(n/1000).toFixed(0)}K`;
+    if (n >= 1_000_000) return `${CURRENCY_SYMBOL}${(n/1_000_000).toFixed(1)}M`;
+    if (n >= 100_000)   return `${CURRENCY_SYMBOL}${(n/1000).toFixed(0)}K`;
     return `${CURRENCY_SYMBOL}${Math.round(n).toLocaleString('en-US')}`;
   }
-  if (n >= 1000) return `${CURRENCY_SYMBOL}${n.toFixed(0)}`;
-  if (n >= 100)  return `${CURRENCY_SYMBOL}${n.toFixed(1)}`;
-  if (n >= 1)    return `${CURRENCY_SYMBOL}${n.toFixed(2)}`;
-  return `${CURRENCY_SYMBOL}${n.toFixed(3)}`;
+  if (n >= 1_000_000) return `${CURRENCY_SYMBOL}${(n/1_000_000).toFixed(2)}M`;
+  if (n >= 100_000)   return `${CURRENCY_SYMBOL}${(n/1000).toFixed(0)}K`;
+  if (n >= 1000)      return `${CURRENCY_SYMBOL}${Math.round(n).toLocaleString('en-US')}`;
+  if (n >= 100)       return `${CURRENCY_SYMBOL}${n.toFixed(0)}`;     // $157
+  if (n >= 1)         return `${CURRENCY_SYMBOL}${n.toFixed(2)}`;     // $29.71
+  return `${CURRENCY_SYMBOL}${n.toFixed(3)}`;                          // $0.123
 }
 function fmtTok(n: number): string {
   if (n >= 1_000_000_000) return (n/1_000_000_000).toFixed(1) + 'B';
@@ -720,34 +722,48 @@ function runWrapped(all: Session[], args: Args, label: string) {
   const overage = args.overageUsd ?? 0;
   const actualPaid = args.plan === 'api' ? totalCost : plan.usdPerMonth + overage;
 
-  const W = 70;
+  // Clean column layout — left-aligned label, value, optional context
+  const W = 64;
   const line = '─'.repeat(W);
   console.log();
   console.log(`  ${C.dim}╭${line}╮${C.reset}`);
+
+  const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '').length;
+  const padRight = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - visLen(s)));
+  const padLeft  = (s: string, n: number) => ' '.repeat(Math.max(0, n - visLen(s))) + s;
+
+  const blank = () => console.log(`  ${C.dim}│${C.reset}${' '.repeat(W)}${C.dim}│${C.reset}`);
   const center = (s: string) => {
-    const visible = s.replace(/\x1b\[[0-9;]*m/g, '');
-    const pad = Math.max(0, Math.floor((W - visible.length) / 2));
-    return ' '.repeat(pad) + s + ' '.repeat(W - pad - visible.length);
+    const pad = Math.max(0, Math.floor((W - visLen(s)) / 2));
+    console.log(`  ${C.dim}│${C.reset}${' '.repeat(pad)}${s}${' '.repeat(W - pad - visLen(s))}${C.dim}│${C.reset}`);
   };
-  const row = (s: string) => console.log(`  ${C.dim}│${C.reset}${center(s)}${C.dim}│${C.reset}`);
-  row('');
-  row(`${C.bold}${C.yellow}◆ YOUR ${label.toUpperCase()}${C.reset}`);
-  row('');
-  row('');
-  row(`${C.bold}${C.green}${fmtCost(totalCost)}${C.reset}  ${C.dim}token-cost at API rates${C.reset}`);
+  // padded row, indent of 4 chars on left
+  const kvrow = (label: string, value: string, note: string = '') => {
+    const inner = `    ${C.dim}${padRight(label, 14)}${C.reset}  ${value}${note ? '   ' + C.dim + note + C.reset : ''}`;
+    console.log(`  ${C.dim}│${C.reset}${padRight(inner, W)}${C.dim}│${C.reset}`);
+  };
+  const headerLine = (s: string) => {
+    const inner = `    ${s}`;
+    console.log(`  ${C.dim}│${C.reset}${padRight(inner, W)}${C.dim}│${C.reset}`);
+  };
+
+  blank();
+  center(`${C.bold}${C.yellow}◆ YOUR ${label.toUpperCase()}${C.reset}`);
+  blank();
+  headerLine(`${C.bold}${C.green}${padLeft(fmtCost(totalCost), 8)}${C.reset}   ${C.dim}token-cost at API rates${C.reset}`);
   if (args.plan !== 'api') {
-    row(`${C.bold}${C.cyan}${fmtCost(actualPaid)}${C.reset}  ${C.dim}what you actually paid${C.reset}`);
+    headerLine(`${C.bold}${C.cyan}${padLeft(fmtCost(actualPaid), 8)}${C.reset}   ${C.dim}what you actually paid${C.reset}`);
   }
-  row('');
-  row(`${C.dim}your dominant project ──${C.reset}  ${C.bold}${C.cyan}${shortPath(topProj[0])}${C.reset}  ${C.dim}(${(projShare*100).toFixed(0)}% of cost)${C.reset}`);
-  row(`${C.dim}most expensive day ────${C.reset}  ${C.bold}${C.yellow}${topDay[0]}${C.reset}  ${C.dim}at ${fmtCost(topDay[1])}${C.reset}`);
-  row(`${C.dim}peak coding hour ──────${C.reset}  ${C.bold}${C.yellow}${String(topHour).padStart(2,'0')}:00${C.reset}  ${C.dim}(${fmtCost(topHourVal)} total)${C.reset}`);
-  row(`${C.dim}favorite tool ─────────${C.reset}  ${C.bold}${C.cyan}${topTool[0]}${C.reset}  ${C.dim}${topTool[1].toLocaleString('en-US')} calls${C.reset}`);
-  row(`${C.dim}cache wizardry ────────${C.reset}  ${C.bold}${C.green}${(cacheHit*100).toFixed(0)}%${C.reset}  ${C.dim}hit rate${C.reset}`);
-  row(`${C.dim}output tokens ─────────${C.reset}  ${C.bold}${C.cyan}${fmtTok(tokensOut)}${C.reset}  ${C.dim}tokens shipped${C.reset}`);
-  row('');
-  row(`${C.dim}share: github.com/ahmedmango/vibecosting${C.reset}`);
-  row('');
+  blank();
+  kvrow('project',    `${C.bold}${C.cyan}${shortPath(topProj[0])}${C.reset}`, `${(projShare*100).toFixed(0)}% of total`);
+  kvrow('peak day',   `${C.bold}${C.yellow}${topDay[0]}${C.reset}`,           `${fmtCost(topDay[1])}`);
+  kvrow('peak hour',  `${C.bold}${C.yellow}${String(topHour).padStart(2,'0')}:00${C.reset}`, `${fmtCost(topHourVal)} that hour`);
+  kvrow('top tool',   `${C.bold}${C.cyan}${topTool[0]}${C.reset}`,            `${topTool[1].toLocaleString('en-US')} calls`);
+  kvrow('cache hit',  `${C.bold}${C.green}${(cacheHit*100).toFixed(0)}%${C.reset}`);
+  kvrow('out tokens', `${C.bold}${C.cyan}${fmtTok(tokensOut)}${C.reset}`,     'shipped');
+  blank();
+  center(`${C.dim}share: github.com/ahmedmango/vibecosting${C.reset}`);
+  blank();
   console.log(`  ${C.dim}╰${line}╯${C.reset}`);
   console.log();
 }
@@ -902,13 +918,12 @@ function runAdvise(all: Session[], args: Args, label: string) {
     ]);
   }
 
-  // 6. Top expensive single turn
+  // 6. Top expensive single turn — one compact line
   if (topMsg && topMsg.cost > 5) {
     const dt = new Date(topMsg.ts);
-    const when = `${dt.toISOString().slice(0,10)} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
-    tip('◆', C.cyan, `MOST EXPENSIVE TURN  ${C.dim}— single response ${C.reset}${C.bold}${fmtCost(topMsg.cost)}${C.reset}`, [
-      `${C.dim}When: ${when}  ·  Where: ${topMsg.project}${C.reset}`,
-      `${C.dim}Probably a "read the entire codebase and summarize" moment. Worth scoping smaller.${C.reset}`,
+    const when = `${dt.toLocaleString('en-US', { month: 'short', day: 'numeric' })} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    tip('◆', C.cyan, `MOST EXPENSIVE TURN  ${C.bold}${fmtCost(topMsg.cost)}${C.reset} ${C.dim}· ${when} in ${topMsg.project}${C.reset}`, [
+      `${C.dim}Likely a "load the whole codebase" moment. Worth scoping smaller.${C.reset}`,
     ]);
   }
 
@@ -982,7 +997,7 @@ async function main() {
     return;
   }
   if (args.version) {
-    console.log('vibecosting 0.4.0');
+    console.log('vibecosting 0.4.1');
     return;
   }
 
