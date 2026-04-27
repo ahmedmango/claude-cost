@@ -40,7 +40,7 @@ $ vibecosting
   │  97%     cache hit · 102 sessions · 17 projects                          │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
-  ▸   $6766  ████████   72%  ~/work/dashboard         opus-4-6    43 sess ·  97% cache
+  ▸   $6766  ████████   72%  ~/picklepoint            opus-4-6    43 sess ·  97% cache
      $722.4  ▉           8%  ~/code/api-sdk           opus-4-6     5 sess ·  97% cache
      $536.9  ▋           6%  ~/code/research          opus-4-6     1 sess ·  98% cache
      $479.1  ▋           5%  ~/code/vibecosting       opus-4-7     1 sess ·  99% cache
