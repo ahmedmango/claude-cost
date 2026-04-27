@@ -40,11 +40,11 @@ $ vibecosting
   │  97%     cache hit · 102 sessions · 17 projects                          │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
-  ▸   $6766  ████████   72%  ~/DemoPortal            opus-4-6    43 sess ·  97% cache
-     $722.4  ▉           8%  ~/doo-demo-sdk          opus-4-6     5 sess ·  97% cache
-     $536.9  ▋           6%  ~/quant                 opus-4-6     1 sess ·  98% cache
-     $479.1  ▋           5%  ~/code/vibecosting      opus-4-7     1 sess ·  99% cache
-     $349.9  ▍           4%  ~                       opus-4-6    17 sess ·  95% cache
+  ▸   $6766  ████████   72%  ~/work/dashboard         opus-4-6    43 sess ·  97% cache
+     $722.4  ▉           8%  ~/code/api-sdk           opus-4-6     5 sess ·  97% cache
+     $536.9  ▋           6%  ~/code/research          opus-4-6     1 sess ·  98% cache
+     $479.1  ▋           5%  ~/code/vibecosting       opus-4-7     1 sess ·  99% cache
+     $349.9  ▍           4%  ~                        opus-4-6    17 sess ·  95% cache
 
   + 12 more · try --all
 ```
